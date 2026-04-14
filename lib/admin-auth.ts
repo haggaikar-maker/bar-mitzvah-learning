@@ -17,7 +17,13 @@ export type AdminSession = {
   isEnvFallback: boolean
 }
 
-export function getConfiguredAdmin() {
+export function getConfiguredAdmin(): {
+  isConfigured: boolean
+  username: string | undefined
+  password: string | undefined
+  displayName: string
+  role: AdminSession['role']
+} {
   const username = process.env.ADMIN_USERNAME
   const password = process.env.ADMIN_PASSWORD
   const displayName = process.env.ADMIN_DISPLAY_NAME ?? username ?? 'מנהל'

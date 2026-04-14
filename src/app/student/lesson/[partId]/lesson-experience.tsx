@@ -206,30 +206,32 @@ export default function LessonExperience({
         <button
           type="button"
           onClick={() => openViewer(Math.max(activeSlideIndex, 0))}
-          className="block w-full rounded-3xl border-2 border-dashed border-slate-300 bg-slate-100 p-4 text-right"
+          className="student-audio-panel block w-full p-4 text-right ring-1 ring-white/70"
         >
           {activeSlide ? (
             <img
               src={activeSlide.image_url}
               alt={`Slide ${activeSlide.slide_index}`}
-              className="w-full rounded-2xl object-contain"
+              className="w-full rounded-[24px] object-contain shadow-2xl shadow-slate-900/10"
             />
           ) : (
-            <div className="flex min-h-[420px] items-center justify-center rounded-2xl bg-white text-center text-slate-400">
+            <div className="flex min-h-[420px] items-center justify-center rounded-[24px] bg-white/85 text-center text-slate-500">
               אין תמונה לתת-החלק הזה
             </div>
           )}
         </button>
 
-        <div className="rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
+        <div className="student-card p-4 ring-1 ring-white/70">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <h4 className="text-lg font-semibold text-slate-900">שקופיות מסונכרנות</h4>
+              <h4 className="text-lg font-black text-slate-900">שקופיות מסונכרנות</h4>
               <p className="text-sm text-slate-500">
                 אפשר לפתוח גדול, או לקפוץ ישירות לשנייה המתאימה בהקלטה.
               </p>
             </div>
-            <span className="text-sm text-slate-500">{initialSlides.length} תמונות</span>
+            <span className="student-badge bg-[var(--student-cream)] text-slate-700 ring-1 ring-amber-100">
+              {initialSlides.length} תמונות
+            </span>
           </div>
 
           {initialSlides.length > 0 ? (
@@ -243,10 +245,10 @@ export default function LessonExperience({
                     type="button"
                     onClick={() => jumpToSlide(index)}
                     onDoubleClick={() => openViewer(index)}
-                    className={`overflow-hidden rounded-2xl bg-white text-right ring-1 transition ${
+                    className={`overflow-hidden rounded-[24px] bg-white text-right shadow-lg shadow-slate-900/5 ring-1 transition ${
                       isActive
-                        ? 'ring-2 ring-blue-500'
-                        : 'ring-slate-200 hover:ring-blue-300'
+                        ? 'ring-2 ring-[var(--student-orange)]'
+                        : 'ring-slate-200 hover:ring-[var(--student-blue)]'
                     }`}
                   >
                     <img
@@ -263,7 +265,7 @@ export default function LessonExperience({
               })}
             </div>
           ) : (
-            <div className="rounded-2xl bg-white p-4 text-sm text-slate-500 ring-1 ring-slate-200">
+            <div className="rounded-[24px] bg-white p-4 text-sm text-slate-500 ring-1 ring-slate-200">
               עדיין לא הוגדרו תמונות לקטע הזה.
             </div>
           )}
@@ -271,8 +273,13 @@ export default function LessonExperience({
       </div>
 
       <div className="space-y-4">
-        <div className="rounded-2xl bg-slate-100 p-4">
-          <p className="mb-2 text-sm font-medium text-slate-600">נגן אודיו</p>
+        <div className="student-audio-panel p-5">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-slate-600">נגן אודיו</p>
+            <span className="student-badge bg-white/80 text-slate-700 ring-1 ring-white/80">
+              הקשבה רציפה = השלמה
+            </span>
+          </div>
 
           {audioUrl ? (
             <audio
@@ -297,16 +304,16 @@ export default function LessonExperience({
           </p>
         </div>
 
-        <div className="rounded-2xl bg-slate-100 p-4">
-          <p className="text-sm text-slate-600">סטטיסטיקה</p>
+        <div className="student-card p-4">
+          <p className="text-sm font-semibold text-slate-600">סטטיסטיקה</p>
           <div className="mt-4 grid grid-cols-2 gap-3">
-            <div className="rounded-2xl bg-white p-4 text-center ring-1 ring-slate-200">
+            <div className="rounded-[24px] bg-white p-4 text-center ring-1 ring-slate-200">
               <p className="text-xs text-slate-400">תרגולים</p>
               <p className="mt-2 text-3xl font-black text-slate-900">
                 {practiceEvents.length}
               </p>
             </div>
-            <div className="rounded-2xl bg-white p-4 text-center ring-1 ring-slate-200">
+            <div className="rounded-[24px] bg-white p-4 text-center ring-1 ring-slate-200">
               <p className="text-xs text-slate-400">השלמות</p>
               <p className="mt-2 text-3xl font-black text-slate-900">
                 {completedCount}
@@ -322,15 +329,15 @@ export default function LessonExperience({
           </p>
         </div>
 
-        <div className="rounded-2xl bg-slate-100 p-4">
-          <p className="text-sm font-medium text-slate-700">היסטוריית תרגול</p>
+        <div className="student-card p-4">
+          <p className="text-sm font-semibold text-slate-700">היסטוריית תרגול</p>
 
           {practiceEvents.length > 0 ? (
             <div className="mt-4 space-y-3">
               {practiceEvents.slice(0, 6).map((event) => (
                 <div
                   key={event.id}
-                  className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-600 ring-1 ring-slate-200"
+                  className="rounded-[24px] bg-white px-4 py-3 text-sm text-slate-600 ring-1 ring-slate-200"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <span>{event.completed ? 'הושלם אוטומטית' : 'התחיל תרגול'}</span>
@@ -345,7 +352,7 @@ export default function LessonExperience({
         </div>
 
         {statusMessage ? (
-          <div className="rounded-2xl bg-blue-50 p-4 text-sm text-blue-900 ring-1 ring-blue-200">
+          <div className="rounded-[24px] bg-blue-50 p-4 text-sm text-blue-900 ring-1 ring-blue-200">
             {statusMessage}
           </div>
         ) : null}

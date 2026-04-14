@@ -536,6 +536,10 @@ export async function copyParashaStructure(formData: FormData) {
     throw new Error('קוד השיתוף אינו תקין.')
   }
 
+  if (sourceAdmin.id === session.id) {
+    throw new Error('אי אפשר להעתיק מבנה מעצמך.')
+  }
+
   const { data: sourceGroups, error: sourceGroupsError } = await supabase
     .from('lesson_groups')
     .select('id, parasha_id, section_id')
@@ -547,6 +551,34 @@ export async function copyParashaStructure(formData: FormData) {
   }
 
   const groups = sourceGroups ?? []
+
+  if (groups.length === 0) {
+    throw new Error('למנהל המקור אין עדיין מבנה לפרשה הזאת, ולכן לא בוצע שינוי.')
+  }
+
+  const sourceGroupIds = groups.map((group) => group.id)
+  const { data: sourceParts, error: sourcePartsError } = await supabase
+    .from('lesson_parts')
+    .select('id, lesson_group_id, name, part_order, is_full_reading, audio_url, duration_seconds')
+    .in('lesson_group_id', sourceGroupIds)
+    .order('part_order', { ascending: true })
+
+  if (sourcePartsError) {
+    throw new Error(sourcePartsError.message)
+  }
+
+  const sourcePartIds = (sourceParts ?? []).map((part) => part.id)
+  const { data: sourceSlides, error: sourceSlidesError } = sourcePartIds.length
+    ? await supabase
+        .from('lesson_slides')
+        .select('lesson_part_id, image_url, slide_index, start_second')
+        .in('lesson_part_id', sourcePartIds)
+        .order('slide_index', { ascending: true })
+    : { data: [], error: null }
+
+  if (sourceSlidesError) {
+    throw new Error(sourceSlidesError.message)
+  }
 
   const { data: existingGroups, error: existingGroupsError } = await supabase
     .from('lesson_groups')
@@ -571,11 +603,6 @@ export async function copyParashaStructure(formData: FormData) {
     }
   }
 
-  if (groups.length === 0) {
-    revalidatePath('/admin')
-    return
-  }
-
   const groupIdMap = new Map<number, number>()
 
   for (const group of groups) {
@@ -594,17 +621,6 @@ export async function copyParashaStructure(formData: FormData) {
     }
 
     groupIdMap.set(group.id, data.id)
-  }
-
-  const sourceGroupIds = groups.map((group) => group.id)
-  const { data: sourceParts, error: sourcePartsError } = await supabase
-    .from('lesson_parts')
-    .select('id, lesson_group_id, name, part_order, is_full_reading, audio_url, duration_seconds')
-    .in('lesson_group_id', sourceGroupIds)
-    .order('part_order', { ascending: true })
-
-  if (sourcePartsError) {
-    throw new Error(sourcePartsError.message)
   }
 
   const partIdMap = new Map<number, number>()
@@ -636,36 +652,22 @@ export async function copyParashaStructure(formData: FormData) {
     partIdMap.set(part.id, data.id)
   }
 
-  const sourcePartIds = (sourceParts ?? []).map((part) => part.id)
+  for (const slide of sourceSlides ?? []) {
+    const targetPartId = partIdMap.get(slide.lesson_part_id)
 
-  if (sourcePartIds.length > 0) {
-    const { data: sourceSlides, error: sourceSlidesError } = await supabase
-      .from('lesson_slides')
-      .select('lesson_part_id, image_url, slide_index, start_second')
-      .in('lesson_part_id', sourcePartIds)
-      .order('slide_index', { ascending: true })
-
-    if (sourceSlidesError) {
-      throw new Error(sourceSlidesError.message)
+    if (!targetPartId) {
+      continue
     }
 
-    for (const slide of sourceSlides ?? []) {
-      const targetPartId = partIdMap.get(slide.lesson_part_id)
+    const { error } = await supabase.from('lesson_slides').insert({
+      lesson_part_id: targetPartId,
+      image_url: slide.image_url,
+      slide_index: slide.slide_index,
+      start_second: slide.start_second,
+    })
 
-      if (!targetPartId) {
-        continue
-      }
-
-      const { error } = await supabase.from('lesson_slides').insert({
-        lesson_part_id: targetPartId,
-        image_url: slide.image_url,
-        slide_index: slide.slide_index,
-        start_second: slide.start_second,
-      })
-
-      if (error) {
-        throw new Error(error.message)
-      }
+    if (error) {
+      throw new Error(error.message)
     }
   }
 

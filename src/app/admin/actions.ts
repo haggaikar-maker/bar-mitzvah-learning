@@ -522,171 +522,210 @@ export async function copyParashaStructure(formData: FormData) {
     throw new Error('יש לבחור פרשה, מנהל מקור וקוד שיתוף.')
   }
 
-  const { data: sourceAdmin, error: sourceAdminError } = await supabase
-    .from('admins')
-    .select('id, share_code_hash')
-    .eq('username', sourceUsername)
-    .maybeSingle()
+  try {
+    const { data: sourceAdmin, error: sourceAdminError } = await supabase
+      .from('admins')
+      .select('id, share_code_hash')
+      .eq('username', sourceUsername)
+      .maybeSingle()
 
-  if (sourceAdminError || !sourceAdmin) {
-    throw new Error(sourceAdminError?.message ?? 'מנהל המקור לא נמצא.')
-  }
+    if (sourceAdminError || !sourceAdmin) {
+      throw new Error(sourceAdminError?.message ?? 'מנהל המקור לא נמצא.')
+    }
 
-  if (!sourceAdmin.share_code_hash || !verifyAdminPassword(shareCode, sourceAdmin.share_code_hash)) {
-    throw new Error('קוד השיתוף אינו תקין.')
-  }
+    if (
+      !sourceAdmin.share_code_hash ||
+      !verifyAdminPassword(shareCode, sourceAdmin.share_code_hash)
+    ) {
+      throw new Error('קוד השיתוף אינו תקין.')
+    }
 
-  if (sourceAdmin.id === session.id) {
-    throw new Error('אי אפשר להעתיק מבנה מעצמך.')
-  }
+    if (sourceAdmin.id === session.id) {
+      throw new Error('אי אפשר להעתיק מבנה מעצמך.')
+    }
 
-  const { data: sourceGroups, error: sourceGroupsError } = await supabase
-    .from('lesson_groups')
-    .select('id, parasha_id, section_id')
-    .eq('admin_id', sourceAdmin.id)
-    .eq('parasha_id', parashaId)
+    const { data: sourceGroups, error: sourceGroupsError } = await supabase
+      .from('lesson_groups')
+      .select('id, parasha_id, section_id')
+      .eq('admin_id', sourceAdmin.id)
+      .eq('parasha_id', parashaId)
+      .order('section_id', { ascending: true })
 
-  if (sourceGroupsError) {
-    throw new Error(sourceGroupsError.message)
-  }
+    if (sourceGroupsError) {
+      throw new Error(`שגיאה בטעינת קבוצות המקור: ${sourceGroupsError.message}`)
+    }
 
-  const groups = sourceGroups ?? []
+    const groups = sourceGroups ?? []
 
-  if (groups.length === 0) {
-    throw new Error('למנהל המקור אין עדיין מבנה לפרשה הזאת, ולכן לא בוצע שינוי.')
-  }
+    if (groups.length === 0) {
+      throw new Error('למנהל המקור אין עדיין מבנה לפרשה הזאת, ולכן לא בוצע שינוי.')
+    }
 
-  const sourceGroupIds = groups.map((group) => group.id)
-  const { data: sourceParts, error: sourcePartsError } = await supabase
-    .from('lesson_parts')
-    .select('id, lesson_group_id, name, part_order, is_full_reading, audio_url, duration_seconds')
-    .in('lesson_group_id', sourceGroupIds)
-    .order('part_order', { ascending: true })
+    const sourceGroupIds = groups.map((group) => group.id)
+    const { data: sourceParts, error: sourcePartsError } = await supabase
+      .from('lesson_parts')
+      .select(
+        'id, lesson_group_id, name, part_order, is_full_reading, audio_url, duration_seconds'
+      )
+      .in('lesson_group_id', sourceGroupIds)
+      .order('part_order', { ascending: true })
 
-  if (sourcePartsError) {
-    throw new Error(sourcePartsError.message)
-  }
+    if (sourcePartsError) {
+      throw new Error(`שגיאה בטעינת תתי־החלקים: ${sourcePartsError.message}`)
+    }
 
-  const sourcePartIds = (sourceParts ?? []).map((part) => part.id)
-  const { data: sourceSlides, error: sourceSlidesError } = sourcePartIds.length
-    ? await supabase
+    const sourcePartIds = (sourceParts ?? []).map((part) => part.id)
+    let sourceSlides: Array<{
+      lesson_part_id: number
+      image_url: string
+      slide_index: number
+      start_second: number
+    }> = []
+
+    if (sourcePartIds.length > 0) {
+      const { data, error } = await supabase
         .from('lesson_slides')
         .select('lesson_part_id, image_url, slide_index, start_second')
         .in('lesson_part_id', sourcePartIds)
         .order('slide_index', { ascending: true })
-    : { data: [], error: null }
 
-  if (sourceSlidesError) {
-    throw new Error(sourceSlidesError.message)
-  }
+      if (error) {
+        throw new Error(`שגיאה בטעינת השקופיות: ${error.message}`)
+      }
 
-  const { data: existingGroups, error: existingGroupsError } = await supabase
-    .from('lesson_groups')
-    .select('id, section_id')
-    .eq('admin_id', session.id)
-    .eq('parasha_id', parashaId)
-
-  if (existingGroupsError) {
-    throw new Error(existingGroupsError.message)
-  }
-
-  const existingGroupsBySectionId = new Map(
-    ((existingGroups ?? []) as Array<{ id: number; section_id: number }>).map((group) => [
-      group.section_id,
-      group.id,
-    ])
-  )
-
-  const groupIdMap = new Map<number, number>()
-  const targetGroupIds: number[] = []
-
-  for (const group of groups) {
-    const existingTargetGroupId = existingGroupsBySectionId.get(group.section_id)
-
-    if (existingTargetGroupId) {
-      groupIdMap.set(group.id, existingTargetGroupId)
-      targetGroupIds.push(existingTargetGroupId)
-      continue
+      sourceSlides = data ?? []
     }
 
-    const { data, error } = await supabase
-      .from('lesson_groups')
-      .insert({
+    const { error: upsertGroupsError } = await supabase.from('lesson_groups').upsert(
+      groups.map((group) => ({
         admin_id: session.id,
         parasha_id: group.parasha_id,
         section_id: group.section_id,
-      })
-      .select('id')
-      .single()
+      })),
+      {
+        onConflict: 'admin_id,parasha_id,section_id',
+        ignoreDuplicates: false,
+      }
+    )
 
-    if (error || !data) {
-      throw new Error(error?.message ?? 'לא ניתן היה ליצור קבוצת שיעור.')
+    if (upsertGroupsError) {
+      throw new Error(`שגיאה בהכנת קבוצות היעד: ${upsertGroupsError.message}`)
     }
 
-    groupIdMap.set(group.id, data.id)
-    targetGroupIds.push(data.id)
-  }
+    const { data: targetGroups, error: targetGroupsError } = await supabase
+      .from('lesson_groups')
+      .select('id, section_id')
+      .eq('admin_id', session.id)
+      .eq('parasha_id', parashaId)
 
-  if (targetGroupIds.length > 0) {
-    const { error: deletePartsError } = await supabase
-      .from('lesson_parts')
-      .delete()
-      .in('lesson_group_id', targetGroupIds)
-
-    if (deletePartsError) {
-      throw new Error(deletePartsError.message)
-    }
-  }
-
-  const partIdMap = new Map<number, number>()
-
-  for (const part of sourceParts ?? []) {
-    const targetGroupId = groupIdMap.get(part.lesson_group_id)
-
-    if (!targetGroupId) {
-      continue
+    if (targetGroupsError) {
+      throw new Error(`שגיאה בטעינת קבוצות היעד: ${targetGroupsError.message}`)
     }
 
-    const { data, error } = await supabase
-      .from('lesson_parts')
-      .insert({
-        lesson_group_id: targetGroupId,
-        name: part.name,
-        part_order: part.part_order,
-        is_full_reading: part.is_full_reading,
-        audio_url: part.audio_url,
-        duration_seconds: part.duration_seconds,
-      })
-      .select('id')
-      .single()
+    const targetGroupsBySectionId = new Map(
+      ((targetGroups ?? []) as Array<{ id: number; section_id: number }>).map((group) => [
+        group.section_id,
+        group.id,
+      ])
+    )
+    const groupIdMap = new Map<number, number>()
 
-    if (error || !data) {
-      throw new Error(error?.message ?? 'לא ניתן היה ליצור תת־חלק.')
+    for (const group of groups) {
+      const targetGroupId = targetGroupsBySectionId.get(group.section_id)
+
+      if (!targetGroupId) {
+        throw new Error(`לא נמצאה קבוצת יעד עבור חלק ${group.section_id}.`)
+      }
+
+      groupIdMap.set(group.id, targetGroupId)
     }
 
-    partIdMap.set(part.id, data.id)
-  }
+    const targetGroupIds = Array.from(new Set(groupIdMap.values()))
 
-  for (const slide of sourceSlides ?? []) {
-    const targetPartId = partIdMap.get(slide.lesson_part_id)
+    if (targetGroupIds.length > 0) {
+      const { error: deletePartsError } = await supabase
+        .from('lesson_parts')
+        .delete()
+        .in('lesson_group_id', targetGroupIds)
 
-    if (!targetPartId) {
-      continue
+      if (deletePartsError) {
+        throw new Error(`שגיאה בניקוי התוכן הישן: ${deletePartsError.message}`)
+      }
     }
 
-    const { error } = await supabase.from('lesson_slides').insert({
-      lesson_part_id: targetPartId,
-      image_url: slide.image_url,
-      slide_index: slide.slide_index,
-      start_second: slide.start_second,
+    const partIdMap = new Map<number, number>()
+
+    for (const part of sourceParts ?? []) {
+      const targetGroupId = groupIdMap.get(part.lesson_group_id)
+
+      if (!targetGroupId) {
+        throw new Error(`לא נמצאה קבוצת יעד עבור תת־החלק ${part.name}.`)
+      }
+
+      const { data, error } = await supabase
+        .from('lesson_parts')
+        .insert({
+          lesson_group_id: targetGroupId,
+          name: part.name,
+          part_order: part.part_order,
+          is_full_reading: part.is_full_reading,
+          audio_url: part.audio_url,
+          duration_seconds: part.duration_seconds,
+        })
+        .select('id')
+        .single()
+
+      if (error || !data) {
+        throw new Error(
+          `שגיאה ביצירת תת־החלק "${part.name}": ${error?.message ?? 'לא ידוע.'}`
+        )
+      }
+
+      partIdMap.set(part.id, data.id)
+    }
+
+    if (sourceSlides.length > 0) {
+      const slidesPayload = sourceSlides
+        .map((slide) => {
+          const targetPartId = partIdMap.get(slide.lesson_part_id)
+
+          if (!targetPartId) {
+            return null
+          }
+
+          return {
+            lesson_part_id: targetPartId,
+            image_url: slide.image_url,
+            slide_index: slide.slide_index,
+            start_second: slide.start_second,
+          }
+        })
+        .filter((slide): slide is NonNullable<typeof slide> => slide !== null)
+
+      if (slidesPayload.length > 0) {
+        const { error: insertSlidesError } = await supabase
+          .from('lesson_slides')
+          .insert(slidesPayload)
+
+        if (insertSlidesError) {
+          throw new Error(`שגיאה בהעתקת השקופיות: ${insertSlidesError.message}`)
+        }
+      }
+    }
+
+    revalidatePath('/admin')
+  } catch (error) {
+    console.error('copyParashaStructure failed', {
+      sessionAdminId: session.id,
+      parashaId,
+      sourceUsername,
+      error,
     })
 
-    if (error) {
-      throw new Error(error.message)
-    }
+    throw error instanceof Error
+      ? error
+      : new Error('אירעה שגיאה לא צפויה בהעתקת המבנה.')
   }
-
-  revalidatePath('/admin')
 }
 
 export async function deleteStudent(formData: FormData) {

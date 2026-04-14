@@ -21,8 +21,8 @@ export function getConfiguredAdmin() {
   const username = process.env.ADMIN_USERNAME
   const password = process.env.ADMIN_PASSWORD
   const displayName = process.env.ADMIN_DISPLAY_NAME ?? username ?? 'מנהל'
-  const role =
-    process.env.ADMIN_ROLE === 'teacher' ? 'teacher' : ('primary' as const)
+  const role: AdminSession['role'] =
+    process.env.ADMIN_ROLE === 'teacher' ? 'teacher' : 'primary'
 
   return {
     isConfigured: Boolean(username && password),

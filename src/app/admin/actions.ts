@@ -1,6 +1,5 @@
 'use server'
 
-import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
@@ -14,6 +13,7 @@ import {
   hashAdminPassword,
   verifyAdminPassword,
 } from '@/lib/admin-security'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 import { supabase } from '@/lib/supabase'
 
 function readString(formData: FormData, key: string) {
@@ -82,16 +82,28 @@ async function saveUploadedFile(
     return null
   }
 
+  const bucketName =
+    input.kind === 'audio'
+      ? process.env.SUPABASE_AUDIO_BUCKET ?? 'lesson-audio'
+      : process.env.SUPABASE_IMAGE_BUCKET ?? 'lesson-images'
   const extension = path.extname(file.name) || ''
   const filename = `${slugifySegment(input.filenameBase)}-${Date.now()}${extension.toLowerCase()}`
-  const folderSegments = ['uploads', input.kind, ...input.segments.map(slugifySegment)]
-  const outputDirectory = path.join(process.cwd(), 'public', ...folderSegments)
-  const outputPath = path.join(outputDirectory, filename)
+  const objectPath = [...input.segments.map(slugifySegment), filename].join('/')
 
-  await mkdir(outputDirectory, { recursive: true })
-  await writeFile(outputPath, Buffer.from(await file.arrayBuffer()))
+  const { error: uploadError } = await supabaseAdmin.storage
+    .from(bucketName)
+    .upload(objectPath, Buffer.from(await file.arrayBuffer()), {
+      contentType: file.type || undefined,
+      upsert: true,
+    })
 
-  return `/${[...folderSegments, filename].join('/')}`
+  if (uploadError) {
+    throw new Error(`שגיאה בהעלאת הקובץ לאחסון: ${uploadError.message}`)
+  }
+
+  const { data } = supabaseAdmin.storage.from(bucketName).getPublicUrl(objectPath)
+
+  return data.publicUrl
 }
 
 export async function loginAdmin(formData: FormData) {

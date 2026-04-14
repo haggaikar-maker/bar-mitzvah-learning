@@ -596,34 +596,18 @@ export async function copyParashaStructure(formData: FormData) {
       sourceSlides = data ?? []
     }
 
-    const { error: upsertGroupsError } = await supabase.from('lesson_groups').upsert(
-      groups.map((group) => ({
-        admin_id: session.id,
-        parasha_id: group.parasha_id,
-        section_id: group.section_id,
-      })),
-      {
-        onConflict: 'admin_id,parasha_id,section_id',
-        ignoreDuplicates: false,
-      }
-    )
-
-    if (upsertGroupsError) {
-      throw new Error(`שגיאה בהכנת קבוצות היעד: ${upsertGroupsError.message}`)
-    }
-
-    const { data: targetGroups, error: targetGroupsError } = await supabase
+    const { data: existingGroups, error: existingGroupsError } = await supabase
       .from('lesson_groups')
       .select('id, section_id')
       .eq('admin_id', session.id)
       .eq('parasha_id', parashaId)
 
-    if (targetGroupsError) {
-      throw new Error(`שגיאה בטעינת קבוצות היעד: ${targetGroupsError.message}`)
+    if (existingGroupsError) {
+      throw new Error(`שגיאה בטעינת קבוצות היעד: ${existingGroupsError.message}`)
     }
 
     const targetGroupsBySectionId = new Map(
-      ((targetGroups ?? []) as Array<{ id: number; section_id: number }>).map((group) => [
+      ((existingGroups ?? []) as Array<{ id: number; section_id: number }>).map((group) => [
         group.section_id,
         group.id,
       ])
@@ -631,10 +615,48 @@ export async function copyParashaStructure(formData: FormData) {
     const groupIdMap = new Map<number, number>()
 
     for (const group of groups) {
-      const targetGroupId = targetGroupsBySectionId.get(group.section_id)
+      let targetGroupId = targetGroupsBySectionId.get(group.section_id)
 
       if (!targetGroupId) {
-        throw new Error(`לא נמצאה קבוצת יעד עבור חלק ${group.section_id}.`)
+        const { data, error } = await supabase
+          .from('lesson_groups')
+          .insert({
+            admin_id: session.id,
+            parasha_id: group.parasha_id,
+            section_id: group.section_id,
+          })
+          .select('id')
+          .single()
+
+        if (error) {
+          const { data: refetchedGroup, error: refetchError } = await supabase
+            .from('lesson_groups')
+            .select('id')
+            .eq('admin_id', session.id)
+            .eq('parasha_id', group.parasha_id)
+            .eq('section_id', group.section_id)
+            .maybeSingle()
+
+          if (refetchError) {
+            throw new Error(
+              `שגיאה בהכנת קבוצת יעד לחלק ${group.section_id}: ${refetchError.message}`
+            )
+          }
+
+          if (!refetchedGroup?.id) {
+            throw new Error(
+              `שגיאה בהכנת קבוצת יעד לחלק ${group.section_id}: ${error.message}`
+            )
+          }
+
+          targetGroupId = refetchedGroup.id
+        } else if (!data?.id) {
+          throw new Error(`לא ניתן היה ליצור קבוצת יעד לחלק ${group.section_id}.`)
+        } else {
+          targetGroupId = data.id
+        }
+
+        targetGroupsBySectionId.set(group.section_id, targetGroupId)
       }
 
       groupIdMap.set(group.id, targetGroupId)

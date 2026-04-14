@@ -38,6 +38,7 @@ export default async function LessonPage({
     parashaName,
     error,
   } = await getLessonPageData(partIdNumber, session.id)
+  const errorMessage = error instanceof Error ? error.message : null
 
   if (error && !student) {
     return (
@@ -157,9 +158,9 @@ export default async function LessonPage({
             />
           </div>
 
-          {error ? (
+          {errorMessage ? (
             <div className="mt-6 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-200">
-              {error.message}
+              {errorMessage}
             </div>
           ) : null}
         </div>

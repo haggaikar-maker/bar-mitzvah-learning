@@ -656,7 +656,15 @@ export async function copyParashaStructure(formData: FormData) {
           targetGroupId = data.id
         }
 
+        if (typeof targetGroupId !== 'number') {
+          throw new Error(`לא נמצאה קבוצת יעד תקינה לחלק ${group.section_id}.`)
+        }
+
         targetGroupsBySectionId.set(group.section_id, targetGroupId)
+      }
+
+      if (typeof targetGroupId !== 'number') {
+        throw new Error(`לא נמצאה קבוצת יעד תקינה לחלק ${group.section_id}.`)
       }
 
       groupIdMap.set(group.id, targetGroupId)

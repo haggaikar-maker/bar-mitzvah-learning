@@ -582,7 +582,7 @@ export async function copyParashaStructure(formData: FormData) {
 
   const { data: existingGroups, error: existingGroupsError } = await supabase
     .from('lesson_groups')
-    .select('id')
+    .select('id, section_id')
     .eq('admin_id', session.id)
     .eq('parasha_id', parashaId)
 
@@ -590,22 +590,25 @@ export async function copyParashaStructure(formData: FormData) {
     throw new Error(existingGroupsError.message)
   }
 
-  const existingGroupIds = (existingGroups ?? []).map((group) => group.id)
-
-  if (existingGroupIds.length > 0) {
-    const { error: deleteExistingError } = await supabase
-      .from('lesson_groups')
-      .delete()
-      .in('id', existingGroupIds)
-
-    if (deleteExistingError) {
-      throw new Error(deleteExistingError.message)
-    }
-  }
+  const existingGroupsBySectionId = new Map(
+    ((existingGroups ?? []) as Array<{ id: number; section_id: number }>).map((group) => [
+      group.section_id,
+      group.id,
+    ])
+  )
 
   const groupIdMap = new Map<number, number>()
+  const targetGroupIds: number[] = []
 
   for (const group of groups) {
+    const existingTargetGroupId = existingGroupsBySectionId.get(group.section_id)
+
+    if (existingTargetGroupId) {
+      groupIdMap.set(group.id, existingTargetGroupId)
+      targetGroupIds.push(existingTargetGroupId)
+      continue
+    }
+
     const { data, error } = await supabase
       .from('lesson_groups')
       .insert({
@@ -621,6 +624,18 @@ export async function copyParashaStructure(formData: FormData) {
     }
 
     groupIdMap.set(group.id, data.id)
+    targetGroupIds.push(data.id)
+  }
+
+  if (targetGroupIds.length > 0) {
+    const { error: deletePartsError } = await supabase
+      .from('lesson_parts')
+      .delete()
+      .in('lesson_group_id', targetGroupIds)
+
+    if (deletePartsError) {
+      throw new Error(deletePartsError.message)
+    }
   }
 
   const partIdMap = new Map<number, number>()

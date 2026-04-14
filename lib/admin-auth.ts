@@ -65,7 +65,7 @@ export async function getAdminSession() {
       id: null,
       username: admin.username!,
       displayName: admin.displayName,
-      role: admin.role,
+      role: admin.role === 'teacher' ? 'teacher' : 'primary',
       isEnvFallback: true,
     } satisfies AdminSession
   }

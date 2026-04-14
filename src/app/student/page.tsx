@@ -33,6 +33,14 @@ export default async function StudentPage() {
     (sum, section) => sum + section.practiceCount,
     0
   )
+  const totalCompletionEvents = sections.reduce(
+    (sum, section) => sum + section.completionEventCount,
+    0
+  )
+  const totalCompletionTarget = sections.reduce(
+    (sum, section) => sum + section.completionTarget,
+    0
+  )
 
   return (
     <main className="min-h-screen bg-slate-50 p-4 sm:p-6">
@@ -73,43 +81,59 @@ export default async function StudentPage() {
                 בחר חלק לתרגול
               </h3>
 
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {sections.map((section) => {
-                  const completionRatio =
-                    section.totalParts > 0
-                      ? Math.round((section.completedParts / section.totalParts) * 100)
-                      : 0
+              {sections.length > 0 ? (
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {sections.map((section) => {
+                    const completionRatio = Math.min(
+                      100,
+                      Math.round(
+                        (section.completionEventCount /
+                          Math.max(section.completionTarget, 1)) *
+                          100
+                      )
+                    )
 
-                  return (
-                    <Link
-                      key={section.id}
-                      href={`/student/section/${section.id}`}
-                      className="rounded-[1.5rem] border border-slate-200 bg-slate-50 p-4 transition hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-50"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <h4 className="text-xl font-bold text-slate-900">
-                          {section.name}
-                        </h4>
-                        <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200">
-                          {section.totalParts} תתי-חלקים
-                        </span>
-                      </div>
+                    return (
+                      <Link
+                        key={section.id}
+                        href={`/student/section/${section.id}`}
+                        className="rounded-[1.5rem] border border-slate-200 bg-slate-50 p-4 transition hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-50"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <h4 className="text-xl font-bold text-slate-900">
+                            {section.name}
+                          </h4>
+                          <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200">
+                            {section.totalParts} תתי-חלקים מוכנים
+                          </span>
+                        </div>
 
-                      <div className="mt-4 h-2 rounded-full bg-slate-200">
-                        <div
-                          className="h-2 rounded-full bg-blue-600"
-                          style={{ width: `${completionRatio}%` }}
-                        />
-                      </div>
+                        <div className="mt-4 h-2 rounded-full bg-slate-200">
+                          <div
+                            className="h-2 rounded-full bg-blue-600"
+                            style={{ width: `${completionRatio}%` }}
+                          />
+                        </div>
 
-                      <div className="mt-4 flex items-center justify-between text-sm text-slate-600">
-                        <span>{section.completedParts} הושלמו</span>
-                        <span>{section.practiceCount} תרגולים</span>
-                      </div>
-                    </Link>
-                  )
-                })}
-              </div>
+                        <div className="mt-4 flex items-center justify-between text-sm text-slate-600">
+                          <span>
+                            {section.completionEventCount}/{section.completionTarget} ליעד
+                          </span>
+                          <span>{section.practiceCount} תרגולים</span>
+                        </div>
+
+                        <p className="mt-3 text-xs text-slate-400">
+                          {section.completedParts} תתי־חלקים הושלמו לפחות פעם אחת
+                        </p>
+                      </Link>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-2xl bg-slate-100 p-4 text-sm text-slate-600">
+                  עדיין אין לתלמיד הזה חלקים מוכנים עם אודיו ושקופיות.
+                </div>
+              )}
             </div>
           </section>
 
@@ -130,6 +154,10 @@ export default async function StudentPage() {
                   <p className="mt-2 text-3xl font-black">{totalPractices}</p>
                 </div>
               </div>
+
+              <p className="mt-4 text-sm text-slate-300">
+                יעד כולל: {totalCompletionEvents}/{totalCompletionTarget || 0} השלמות
+              </p>
             </div>
 
             <div className="rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200">

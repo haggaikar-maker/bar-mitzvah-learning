@@ -34,6 +34,7 @@ create table if not exists lesson_groups (
   admin_id bigint not null references admins(id) on delete cascade,
   parasha_id bigint not null references parashot(id) on delete cascade,
   section_id bigint not null references sections(id) on delete cascade,
+  completion_target integer not null default 3,
   unique (admin_id, parasha_id, section_id)
 );
 
@@ -43,6 +44,8 @@ create table if not exists lesson_parts (
   name text not null,
   part_order integer not null,
   is_full_reading boolean not null default false,
+  is_visible_to_student boolean not null default true,
+  completion_target integer not null default 3,
   audio_url text null,
   duration_seconds integer null
 );
@@ -78,6 +81,9 @@ alter table students add column if not exists username text null;
 alter table students add column if not exists password_hash text null;
 alter table admins add column if not exists share_code_hash text null;
 alter table lesson_groups add column if not exists admin_id bigint null references admins(id) on delete cascade;
+alter table lesson_groups add column if not exists completion_target integer not null default 3;
+alter table lesson_parts add column if not exists is_visible_to_student boolean not null default true;
+alter table lesson_parts add column if not exists completion_target integer not null default 3;
 
 do $$
 begin

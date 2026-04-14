@@ -13,9 +13,10 @@ export type AdminStudent = Student
 
 export type AdminLessonGroup = {
   id: number
-  admin_id?: number
+  admin_id?: number | null
   parasha_id: number
   section_id: number
+  completion_target?: number | null
 }
 
 export type AdminRecord = {
@@ -31,10 +32,30 @@ export type ParashaSource = {
   displayName: string
 }
 
+export type StudentTrackingRow = {
+  lessonPartId: number
+  sectionName: string
+  partName: string
+  partOrder: number
+  isVisibleToStudent: boolean
+  completionTarget: number
+  hasAudio: boolean
+  slideCount: number
+  practiceCount: number
+  completedCount: number
+  lastPracticedAt: string | null
+}
+
+export type StudentTrackingSummary = {
+  student: AdminStudent
+  rows: StudentTrackingRow[]
+}
+
 export async function getAdminDashboardData(selected?: {
   parashaId?: number | null
   sectionId?: number | null
   partId?: number | null
+  trackingStudentId?: number | null
 }, session?: AdminSession) {
   const [{ data: parashot, error: parashotError }, { data: sections, error: sectionsError }, { data: students, error: studentsError }] =
     await Promise.all([
@@ -74,6 +95,8 @@ export async function getAdminDashboardData(selected?: {
       selectedParashaId: selected?.parashaId ?? null,
       selectedSectionId: selected?.sectionId ?? null,
       selectedPartId: selected?.partId ?? null,
+      selectedTrackingStudentId: selected?.trackingStudentId ?? null,
+      trackingSummary: null as StudentTrackingSummary | null,
       parashaSources: [] as ParashaSource[],
       error: parashotError ?? sectionsError ?? studentsError,
     }
@@ -114,17 +137,20 @@ export async function getAdminDashboardData(selected?: {
     selected?.parashaId ?? availableParashot[0]?.id ?? null
   const selectedSectionId =
     selected?.sectionId ?? availableSections[0]?.id ?? null
+  const selectedTrackingStudentId =
+    selected?.trackingStudentId ?? visibleStudents[0]?.id ?? null
 
   let lessonGroup: AdminLessonGroup | null = null
   let lessonParts: LessonPart[] = []
   let lessonSlides: LessonSlide[] = []
   let selectedPartId = selected?.partId ?? null
   let legacyContentWarning: Error | null = null
+  let trackingSummary: StudentTrackingSummary | null = null
 
   if (selectedParashaId && selectedSectionId) {
     const { data: groupData, error: groupError } = await supabase
       .from('lesson_groups')
-      .select('id, admin_id, parasha_id, section_id')
+      .select('*')
       .eq('admin_id', session?.id ?? -1)
       .eq('parasha_id', selectedParashaId)
       .eq('section_id', selectedSectionId)
@@ -143,6 +169,8 @@ export async function getAdminDashboardData(selected?: {
           selectedParashaId,
           selectedSectionId,
           selectedPartId,
+          selectedTrackingStudentId,
+          trackingSummary,
           parashaSources: [] as ParashaSource[],
           error: groupError ?? relationshipWarning,
         }
@@ -153,7 +181,7 @@ export async function getAdminDashboardData(selected?: {
     if (!lessonGroup && session?.role === 'primary') {
       const { data: legacyGroupData, error: legacyGroupError } = await supabase
         .from('lesson_groups')
-        .select('id, admin_id, parasha_id, section_id')
+        .select('*')
         .is('admin_id', null)
         .eq('parasha_id', selectedParashaId)
         .eq('section_id', selectedSectionId)
@@ -172,6 +200,8 @@ export async function getAdminDashboardData(selected?: {
           selectedParashaId,
           selectedSectionId,
           selectedPartId,
+          selectedTrackingStudentId,
+          trackingSummary,
           parashaSources: [] as ParashaSource[],
           error: legacyGroupError ?? relationshipWarning,
         }
@@ -189,9 +219,7 @@ export async function getAdminDashboardData(selected?: {
     if (lessonGroup) {
       const { data: partData, error: partsError } = await supabase
         .from('lesson_parts')
-        .select(
-          'id, lesson_group_id, name, part_order, is_full_reading, audio_url, duration_seconds'
-        )
+        .select('*')
         .eq('lesson_group_id', lessonGroup.id)
         .order('part_order', { ascending: true })
 
@@ -204,13 +232,15 @@ export async function getAdminDashboardData(selected?: {
           managerByStudentId,
           lessonGroup,
           lessonParts: [],
-          lessonSlides: [],
-          selectedParashaId,
-          selectedSectionId,
-          selectedPartId,
-          parashaSources: [] as ParashaSource[],
-          error: partsError ?? relationshipWarning,
-        }
+            lessonSlides: [],
+            selectedParashaId,
+            selectedSectionId,
+            selectedPartId,
+            selectedTrackingStudentId,
+            trackingSummary,
+            parashaSources: [] as ParashaSource[],
+            error: partsError ?? relationshipWarning,
+          }
       }
 
       lessonParts = (partData ?? []) as LessonPart[]
@@ -236,6 +266,8 @@ export async function getAdminDashboardData(selected?: {
             selectedParashaId,
             selectedSectionId,
             selectedPartId,
+            selectedTrackingStudentId,
+            trackingSummary,
             parashaSources: [] as ParashaSource[],
             error: slidesError ?? relationshipWarning,
           }
@@ -277,6 +309,169 @@ export async function getAdminDashboardData(selected?: {
     parashaSources = Array.from(uniqueSources.values())
   }
 
+  const trackingStudent =
+    visibleStudents.find((student) => student.id === selectedTrackingStudentId) ?? null
+
+  if (trackingStudent?.admin_id && trackingStudent.parasha_id) {
+    const { data: trackingGroups, error: trackingGroupsError } = await supabase
+      .from('lesson_groups')
+      .select('*')
+      .eq('admin_id', trackingStudent.admin_id)
+      .eq('parasha_id', trackingStudent.parasha_id)
+
+    if (trackingGroupsError) {
+      return {
+        parashot: availableParashot,
+        sections: availableSections,
+        students: visibleStudents,
+        admins: availableAdmins,
+        managerByStudentId,
+        lessonGroup,
+        lessonParts,
+        lessonSlides,
+        selectedParashaId,
+        selectedSectionId,
+        selectedPartId,
+        selectedTrackingStudentId,
+        trackingSummary,
+        parashaSources,
+        error: trackingGroupsError,
+      }
+    }
+
+    const groups = (trackingGroups ?? []) as AdminLessonGroup[]
+    const sectionNameById = new Map(availableSections.map((section) => [section.id, section.name]))
+    const groupIds = groups.map((group) => group.id)
+
+    if (groupIds.length > 0) {
+      const { data: trackingParts, error: trackingPartsError } = await supabase
+        .from('lesson_parts')
+        .select('*')
+        .in('lesson_group_id', groupIds)
+        .order('part_order', { ascending: true })
+
+      if (trackingPartsError) {
+        return {
+          parashot: availableParashot,
+          sections: availableSections,
+          students: visibleStudents,
+          admins: availableAdmins,
+          managerByStudentId,
+          lessonGroup,
+          lessonParts,
+          lessonSlides,
+          selectedParashaId,
+          selectedSectionId,
+          selectedPartId,
+          selectedTrackingStudentId,
+          trackingSummary,
+          parashaSources,
+          error: trackingPartsError,
+        }
+      }
+
+      const parts = (trackingParts ?? []) as LessonPart[]
+      const partIds = parts.map((part) => part.id)
+
+      const [{ data: slidesData, error: slidesError }, { data: practiceEvents, error: practiceEventsError }] =
+        await Promise.all([
+          partIds.length
+            ? supabase
+                .from('lesson_slides')
+                .select('lesson_part_id')
+                .in('lesson_part_id', partIds)
+            : Promise.resolve({ data: [], error: null }),
+          partIds.length
+            ? supabase
+                .from('practice_events')
+                .select('lesson_part_id, completed, created_at')
+                .eq('student_id', trackingStudent.id)
+                .in('lesson_part_id', partIds)
+                .order('created_at', { ascending: false })
+            : Promise.resolve({ data: [], error: null }),
+        ])
+
+      if (slidesError || practiceEventsError) {
+        return {
+          parashot: availableParashot,
+          sections: availableSections,
+          students: visibleStudents,
+          admins: availableAdmins,
+          managerByStudentId,
+          lessonGroup,
+          lessonParts,
+          lessonSlides,
+          selectedParashaId,
+          selectedSectionId,
+          selectedPartId,
+          selectedTrackingStudentId,
+          trackingSummary,
+          parashaSources,
+          error: slidesError ?? practiceEventsError,
+        }
+      }
+
+      const slideCountByPartId = new Map<number, number>()
+
+      for (const row of (slidesData ?? []) as Array<{ lesson_part_id: number }>) {
+        slideCountByPartId.set(
+          row.lesson_part_id,
+          (slideCountByPartId.get(row.lesson_part_id) ?? 0) + 1
+        )
+      }
+
+      const eventsByPartId = new Map<
+        number,
+        Array<{ lesson_part_id: number; completed: boolean; created_at: string }>
+      >()
+
+      for (const event of
+        (practiceEvents ?? []) as Array<{
+          lesson_part_id: number
+          completed: boolean
+          created_at: string
+        }>) {
+        const current = eventsByPartId.get(event.lesson_part_id) ?? []
+        current.push(event)
+        eventsByPartId.set(event.lesson_part_id, current)
+      }
+
+      const groupById = new Map(groups.map((group) => [group.id, group]))
+
+      trackingSummary = {
+        student: trackingStudent,
+        rows: parts.map((part) => {
+          const events = eventsByPartId.get(part.id) ?? []
+          const group = groupById.get(part.lesson_group_id)
+
+          return {
+            lessonPartId: part.id,
+            sectionName: sectionNameById.get(group?.section_id ?? -1) ?? 'ללא חלק',
+            partName: part.name,
+            partOrder: part.part_order,
+            isVisibleToStudent: part.is_visible_to_student ?? true,
+            completionTarget: Math.max(part.completion_target ?? 3, 1),
+            hasAudio: Boolean(part.audio_url),
+            slideCount: slideCountByPartId.get(part.id) ?? 0,
+            practiceCount: events.length,
+            completedCount: events.filter((event) => event.completed).length,
+            lastPracticedAt: events[0]?.created_at ?? null,
+          }
+        }),
+      }
+    } else {
+      trackingSummary = {
+        student: trackingStudent,
+        rows: [],
+      }
+    }
+  } else if (trackingStudent) {
+    trackingSummary = {
+      student: trackingStudent,
+      rows: [],
+    }
+  }
+
   return {
     parashot: availableParashot,
     sections: availableSections,
@@ -289,6 +484,8 @@ export async function getAdminDashboardData(selected?: {
     selectedParashaId,
     selectedSectionId,
     selectedPartId,
+    selectedTrackingStudentId,
+    trackingSummary,
     parashaSources,
     error: legacyContentWarning ?? relationshipWarning,
   }

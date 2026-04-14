@@ -34,6 +34,7 @@ export default async function LessonPage({
     section,
     slides,
     practiceEvents,
+    navigation,
     parashaName,
     error,
   } = await getLessonPageData(partIdNumber, session.id)
@@ -69,6 +70,26 @@ export default async function LessonPage({
     redirect('/student')
   }
 
+  if (error) {
+    return (
+      <main className="min-h-screen bg-slate-50 p-4 sm:p-6">
+        <div className="mx-auto max-w-3xl rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <Link
+              href={`/student/section/${lessonGroup.section_id}`}
+              className="inline-block rounded-xl bg-white px-4 py-2 text-sm font-medium text-slate-700 ring-1 ring-slate-200"
+            >
+              חזרה לתת-חלקים
+            </Link>
+          </div>
+
+          <h1 className="text-2xl font-bold text-slate-900">הקטע עדיין לא זמין</h1>
+          <p className="mt-4 text-sm leading-7 text-slate-600">{error.message}</p>
+        </div>
+      </main>
+    )
+  }
+
   return (
     <main className="min-h-screen bg-slate-50 p-4 sm:p-6">
       <div className="mx-auto max-w-6xl">
@@ -79,6 +100,22 @@ export default async function LessonPage({
           >
             חזרה לתת-חלקים
           </Link>
+          {navigation.previous ? (
+            <Link
+              href={`/student/lesson/${navigation.previous.id}`}
+              className="inline-block rounded-xl bg-white px-4 py-2 text-sm font-medium text-slate-700 ring-1 ring-slate-200"
+            >
+              לחלק הקודם
+            </Link>
+          ) : null}
+          {navigation.next ? (
+            <Link
+              href={`/student/lesson/${navigation.next.id}`}
+              className="inline-block rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
+            >
+              לחלק הבא
+            </Link>
+          ) : null}
           <form action={logoutUser}>
             <button
               type="submit"
@@ -105,6 +142,9 @@ export default async function LessonPage({
             <h3 className="mt-1 text-4xl font-extrabold text-slate-900">
               {lessonPart.name}
             </h3>
+            <p className="mt-3 text-sm text-slate-600">
+              אפשר לעבור ישר לקטע הבא או לחזור לקטע קודם לפי סדר הקריאה.
+            </p>
           </div>
 
           <div className="mt-8 grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">

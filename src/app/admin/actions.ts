@@ -13,7 +13,7 @@ import {
   hashAdminPassword,
   verifyAdminPassword,
 } from '@/lib/admin-security'
-import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { supabase } from '@/lib/supabase'
 
 function readString(formData: FormData, key: string) {
@@ -89,6 +89,7 @@ async function saveUploadedFile(
   const extension = path.extname(file.name) || ''
   const filename = `${slugifySegment(input.filenameBase)}-${Date.now()}${extension.toLowerCase()}`
   const objectPath = [...input.segments.map(slugifySegment), filename].join('/')
+  const supabaseAdmin = getSupabaseAdmin()
 
   const { error: uploadError } = await supabaseAdmin.storage
     .from(bucketName)
@@ -325,6 +326,8 @@ export async function upsertLessonPart(formData: FormData) {
   const currentAudioUrl = readString(formData, 'current_audio_url')
   const currentDurationSeconds = readNumber(formData, 'current_duration_seconds')
   const isFullReading = readString(formData, 'is_full_reading') === 'on'
+  const isVisibleToStudent = readString(formData, 'is_visible_to_student') === 'on'
+  const completionTarget = readNumber(formData, 'completion_target')
   const parashaName = readString(formData, 'parasha_name')
   const sectionName = readString(formData, 'section_name')
   const uploadedAudioUrl = await saveUploadedFile(formData.get('audio_file'), {
@@ -337,11 +340,17 @@ export async function upsertLessonPart(formData: FormData) {
     throw new Error('יש להזין שם תת-חלק, סדר ומזהה קבוצה.')
   }
 
+  if (completionTarget !== null && completionTarget < 1) {
+    throw new Error('יעד ההשלמות חייב להיות לפחות 1.')
+  }
+
   const payload = {
     lesson_group_id: lessonGroupId,
     name,
     part_order: partOrder,
     is_full_reading: isFullReading,
+    is_visible_to_student: isVisibleToStudent,
+    completion_target: completionTarget ?? 3,
     audio_url:
       uploadedAudioUrl ??
       (normalizePublicPath(audioUrl) || normalizePublicPath(currentAudioUrl) || null),
@@ -350,10 +359,77 @@ export async function upsertLessonPart(formData: FormData) {
 
   if (id) {
     const { error } = await supabase.from('lesson_parts').update(payload).eq('id', id)
-    if (error) throw new Error(error.message)
+    if (error) {
+      if (
+        error.message.includes('completion_target') ||
+        error.message.includes('is_visible_to_student')
+      ) {
+        throw new Error(
+          'עמודות היעד או החשיפה עדיין לא קיימות בבסיס הנתונים. צריך להריץ את עדכון ה-SQL החדש.'
+        )
+      }
+
+      throw new Error(error.message)
+    }
   } else {
     const { error } = await supabase.from('lesson_parts').insert(payload)
-    if (error) throw new Error(error.message)
+    if (error) {
+      if (
+        error.message.includes('completion_target') ||
+        error.message.includes('is_visible_to_student')
+      ) {
+        throw new Error(
+          'עמודות היעד או החשיפה עדיין לא קיימות בבסיס הנתונים. צריך להריץ את עדכון ה-SQL החדש.'
+        )
+      }
+
+      throw new Error(error.message)
+    }
+  }
+
+  revalidatePath('/admin')
+  revalidatePath('/student')
+}
+
+export async function resetStudentPartProgress(formData: FormData) {
+  const session = await requireAdminSession()
+
+  const studentId = readNumber(formData, 'student_id')
+  const lessonPartId = readNumber(formData, 'lesson_part_id')
+  const mode = readString(formData, 'mode')
+
+  if (!studentId || !lessonPartId) {
+    throw new Error('חסרים מזהי תלמיד או תת־חלק.')
+  }
+
+  const { data: student, error: studentError } = await supabase
+    .from('students')
+    .select('id, admin_id')
+    .eq('id', studentId)
+    .maybeSingle()
+
+  if (studentError || !student) {
+    throw new Error(studentError?.message ?? 'התלמיד לא נמצא.')
+  }
+
+  if (session.role !== 'primary' && student.admin_id !== session.id) {
+    throw new Error('אין הרשאה לאפס נתוני מעקב עבור תלמיד זה.')
+  }
+
+  let query = supabase
+    .from('practice_events')
+    .delete()
+    .eq('student_id', studentId)
+    .eq('lesson_part_id', lessonPartId)
+
+  if (mode === 'completed') {
+    query = query.eq('completed', true)
+  }
+
+  const { error } = await query
+
+  if (error) {
+    throw new Error(error.message)
   }
 
   revalidatePath('/admin')

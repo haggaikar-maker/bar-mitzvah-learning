@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { logoutUser } from '../../../auth-actions'
 import { getSectionPageData } from '@/lib/practice-data'
+import { AudioDuration } from '../../../../components/audio-duration'
 import { requireStudentSession } from '@/lib/student-auth'
 
 export default async function SectionPartsPage({
@@ -110,7 +111,13 @@ export default async function SectionPartsPage({
 
                     <div className="mt-5 flex items-center justify-between text-sm text-slate-600">
                       <span>{part.completedCount} השלמות</span>
-                      <span>{part.duration_seconds ? `${part.duration_seconds} שנ׳` : 'ללא משך'}</span>
+                      <span>
+                        <AudioDuration
+                          src={part.audio_url}
+                          fallback="ללא משך"
+                          loadingLabel="טוען משך..."
+                        />
+                      </span>
                     </div>
 
                     <p className="mt-3 text-xs text-slate-400">
@@ -123,7 +130,7 @@ export default async function SectionPartsPage({
               </div>
             ) : (
               <div className="rounded-2xl bg-slate-100 p-4 text-slate-600">
-                אין עדיין תתי-חלקים לחלק הזה עבור הפרשה של התלמיד.
+                אין עדיין תתי-חלקים מוכנים לחלק הזה. רק קטעים עם אודיו ולפחות שקופית אחת מוצגים לתלמיד.
               </div>
             )}
           </div>

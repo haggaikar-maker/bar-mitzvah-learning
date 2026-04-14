@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
+import { redirect } from 'next/navigation'
 import { getAdminDashboardData } from '@/lib/admin-data'
-import { getAdminSession, getConfiguredAdmin } from '@/lib/admin-auth'
+import { getAdminSession } from '@/lib/admin-auth'
 import {
   copyParashaStructure,
   deleteAdmin,
@@ -11,9 +12,9 @@ import {
   deleteSection,
   deleteStudent,
   ensureLessonGroup,
-  loginAdmin,
   logoutAdmin,
   updateMyShareCode,
+  resetStudentPartProgress,
   upsertAdmin,
   upsertLessonPart,
   upsertLessonSlide,
@@ -38,13 +39,18 @@ function DisclosureSection({
   title,
   description,
   children,
+  defaultOpen = false,
 }: {
   title: string
   description: string
   children: ReactNode
+  defaultOpen?: boolean
 }) {
   return (
-    <details className="rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200">
+    <details
+      open={defaultOpen}
+      className="rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200"
+    >
       <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">{title}</h2>
@@ -61,78 +67,16 @@ function DisclosureSection({
 
 export default async function AdminPage({ searchParams }: AdminPageProps) {
   const session = await getAdminSession()
-  const configuredAdmin = getConfiguredAdmin()
   const resolvedSearchParams = await searchParams
 
   if (!session) {
-    const errorCode = Array.isArray(resolvedSearchParams.error)
-      ? resolvedSearchParams.error[0]
-      : resolvedSearchParams.error
-
-    const loginError =
-      errorCode === 'invalid'
-        ? 'שם המשתמש או הסיסמה אינם נכונים.'
-        : errorCode === 'setup'
-          ? 'יש להגדיר ADMIN_USERNAME ו-ADMIN_PASSWORD בקובץ .env.local.'
-          : null
-
-    return (
-      <main className="min-h-screen bg-slate-50 p-4 sm:p-6">
-        <div className="mx-auto max-w-md rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
-          <p className="text-sm font-medium text-blue-700">אזור מנהל</p>
-          <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900">
-            התחברות לניהול המערכת
-          </h1>
-          <p className="mt-4 text-sm leading-7 text-slate-600">
-            הגרסה הראשונית משתמשת בשם משתמש וסיסמה מתוך קובץ הסביבה. אחרי
-            שנמסד טבלת מנהלים, נחבר גם שיוך קבוע בין מנהל לתלמידים.
-          </p>
-
-          <form action={loginAdmin} className="mt-8 space-y-4">
-            <label className="block">
-              <span className="mb-2 block text-sm font-medium text-slate-700">
-                שם משתמש
-              </span>
-              <input
-                name="username"
-                type="text"
-                defaultValue={configuredAdmin.username ?? ''}
-                className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none ring-0"
-              />
-            </label>
-
-            <label className="block">
-              <span className="mb-2 block text-sm font-medium text-slate-700">
-                סיסמה
-              </span>
-              <input
-                name="password"
-                type="password"
-                className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none ring-0"
-              />
-            </label>
-
-            <button
-              type="submit"
-              className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
-            >
-              כניסה
-            </button>
-          </form>
-
-          {loginError ? (
-            <div className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-200">
-              {loginError}
-            </div>
-          ) : null}
-        </div>
-      </main>
-    )
+    redirect('/')
   }
 
   const selectedParashaId = toNumber(resolvedSearchParams.parashaId)
   const selectedSectionId = toNumber(resolvedSearchParams.sectionId)
   const selectedPartId = toNumber(resolvedSearchParams.partId)
+  const parsedTrackingStudentId = toNumber(resolvedSearchParams.trackingStudentId)
 
   const {
     parashot,
@@ -146,12 +90,15 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     selectedParashaId: activeParashaId,
     selectedSectionId: activeSectionId,
     selectedPartId: activePartId,
+    selectedTrackingStudentId,
+    trackingSummary,
     parashaSources,
     error,
   } = await getAdminDashboardData({
     parashaId: selectedParashaId,
     sectionId: selectedSectionId,
     partId: selectedPartId,
+    trackingStudentId: parsedTrackingStudentId,
   }, session)
 
   const selectedParasha = parashot.find((parasha) => parasha.id === activeParashaId)
@@ -160,6 +107,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   const unassignedStudents = students.filter(
     (student) => !managerByStudentId[student.id]
   ).length
+  const trackingRows = trackingSummary?.rows ?? []
 
   return (
     <main className="min-h-screen bg-slate-50 p-4 sm:p-6">
@@ -219,6 +167,159 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             <p className="mt-2 text-3xl font-black text-slate-900">{unassignedStudents}</p>
           </div>
         </div>
+
+        <DisclosureSection
+          title="מעקב תרגולים והשלמות"
+          description="בחר תלמיד כדי לראות עבור כל תת־חלק כמה פעמים תרגל, כמה השלמות נרשמו, והאם הקטע זמין לתלמיד."
+        >
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div />
+          </div>
+
+          <form className="mt-6 grid gap-3 md:grid-cols-[1fr_auto]">
+            <input
+              type="hidden"
+              name="parashaId"
+              value={activeParashaId ?? ''}
+            />
+            <input
+              type="hidden"
+              name="sectionId"
+              value={activeSectionId ?? ''}
+            />
+            <input
+              type="hidden"
+              name="partId"
+              value={activePartId ?? ''}
+            />
+            <select
+              name="trackingStudentId"
+              defaultValue={selectedTrackingStudentId ?? ''}
+              className="rounded-2xl border border-slate-200 px-4 py-3"
+            >
+              <option value="">בחר תלמיד למעקב</option>
+              {students.map((student) => (
+                <option key={student.id} value={student.id}>
+                  {student.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
+            >
+              הצגת מעקב
+            </button>
+          </form>
+
+          {trackingSummary ? (
+            <div className="mt-6 overflow-x-auto rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900">
+                    מעקב עבור {trackingSummary.student.name}
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {trackingRows.length > 0
+                      ? `${trackingRows.length} תתי־חלקים במעקב`
+                      : 'עדיין אין לתלמיד תתי־חלקים מוכנים או משויכים.'}
+                  </p>
+                </div>
+              </div>
+
+              {trackingRows.length > 0 ? (
+                <table className="min-w-full divide-y divide-slate-200 text-sm">
+                  <thead>
+                    <tr className="text-right text-slate-500">
+                      <th className="px-3 py-2 font-semibold">חלק</th>
+                      <th className="px-3 py-2 font-semibold">תת־חלק</th>
+                      <th className="px-3 py-2 font-semibold">חשיפה</th>
+                      <th className="px-3 py-2 font-semibold">יעד</th>
+                      <th className="px-3 py-2 font-semibold">מדיה</th>
+                      <th className="px-3 py-2 font-semibold">תרגולים</th>
+                      <th className="px-3 py-2 font-semibold">השלמות</th>
+                      <th className="px-3 py-2 font-semibold">תרגול אחרון</th>
+                      <th className="px-3 py-2 font-semibold">איפוס</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 text-slate-700">
+                    {trackingRows.map((row) => (
+                      <tr key={`${row.sectionName}-${row.partName}-${row.partOrder}`}>
+                        <td className="px-3 py-3">{row.sectionName}</td>
+                        <td className="px-3 py-3">
+                          <div className="font-medium text-slate-900">{row.partName}</div>
+                          <div className="text-xs text-slate-500">סדר {row.partOrder}</div>
+                        </td>
+                        <td className="px-3 py-3">
+                          {row.isVisibleToStudent ? 'מוצג לתלמיד' : 'מוסתר כרגע'}
+                        </td>
+                        <td className="px-3 py-3">{row.completedCount}/{row.completionTarget}</td>
+                        <td className="px-3 py-3">
+                          {row.hasAudio && row.slideCount > 0
+                            ? `מוכן: ${row.slideCount} שקופיות`
+                            : 'חסר אודיו או שקופיות'}
+                        </td>
+                        <td className="px-3 py-3">{row.practiceCount}</td>
+                        <td className="px-3 py-3">{row.completedCount}</td>
+                        <td className="px-3 py-3">
+                          {row.lastPracticedAt
+                            ? new Date(row.lastPracticedAt).toLocaleString('he-IL')
+                            : 'עדיין לא תורגל'}
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="grid gap-2">
+                            <form action={resetStudentPartProgress}>
+                              <input
+                                type="hidden"
+                                name="student_id"
+                                value={trackingSummary.student.id}
+                              />
+                              <input
+                                type="hidden"
+                                name="lesson_part_id"
+                                value={row.lessonPartId}
+                              />
+                              <input type="hidden" name="mode" value="completed" />
+                              <button
+                                type="submit"
+                                className="w-full rounded-xl bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-900"
+                              >
+                                איפוס השלמות
+                              </button>
+                            </form>
+                            <form action={resetStudentPartProgress}>
+                              <input
+                                type="hidden"
+                                name="student_id"
+                                value={trackingSummary.student.id}
+                              />
+                              <input
+                                type="hidden"
+                                name="lesson_part_id"
+                                value={row.lessonPartId}
+                              />
+                              <input type="hidden" name="mode" value="all" />
+                              <button
+                                type="submit"
+                                className="w-full rounded-xl bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-900"
+                              >
+                                איפוס תרגולים
+                              </button>
+                            </form>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="rounded-2xl bg-white p-4 text-sm text-slate-500 ring-1 ring-slate-200">
+                  לתלמיד הזה עדיין אין תתי־חלקים משויכים עם נתוני מעקב להצגה.
+                </div>
+              )}
+            </div>
+          ) : null}
+        </DisclosureSection>
 
         <section className="order-[3] rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200">
           <div className="grid gap-6 xl:grid-cols-2">
@@ -730,6 +831,23 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                           משך האודיו: <AudioDuration src={part.audio_url} />
                         </div>
                       </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <input
+                          name="completion_target"
+                          type="number"
+                          min="1"
+                          defaultValue={part.completion_target ?? 3}
+                          className="rounded-2xl border border-slate-200 px-4 py-3"
+                        />
+                        <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                          <input
+                            name="is_visible_to_student"
+                            type="checkbox"
+                            defaultChecked={part.is_visible_to_student ?? true}
+                          />
+                          להציג לתלמיד
+                        </label>
+                      </div>
                       <div className="rounded-2xl bg-white p-3 text-sm text-slate-600 ring-1 ring-slate-200">
                         {part.audio_url
                           ? `אודיו משויך: ${part.audio_url}`
@@ -801,6 +919,23 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                       משך האודיו יוצג אוטומטית אחרי שיוגדר קובץ לקטע.
                     </div>
                   </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <input
+                      name="completion_target"
+                      type="number"
+                      min="1"
+                      defaultValue={3}
+                      className="rounded-2xl border border-slate-200 px-4 py-3"
+                    />
+                    <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                      <input
+                        name="is_visible_to_student"
+                        type="checkbox"
+                        defaultChecked
+                      />
+                      להציג לתלמיד
+                    </label>
+                  </div>
                   <label className="flex items-center gap-3 text-sm text-slate-700">
                     <input name="is_full_reading" type="checkbox" />
                     סימון כקריאה מלאה
@@ -848,6 +983,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         name="part_order"
                         value={selectedPart?.part_order ?? ''}
                       />
+                      <input
+                        type="hidden"
+                        name="completion_target"
+                        value={selectedPart?.completion_target ?? 3}
+                      />
+                      {(selectedPart?.is_visible_to_student ?? true) ? (
+                        <input type="hidden" name="is_visible_to_student" value="on" />
+                      ) : null}
                       <input
                         type="hidden"
                         name="current_audio_url"

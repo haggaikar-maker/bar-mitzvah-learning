@@ -137,14 +137,21 @@ export default async function SectionPartsPage({
                           <span>{part.completedCount}/{part.completionTarget} ליעד</span>
                           <span>
                             <AudioDuration
-                              src={part.audio_url}
-                              fallback="ללא משך"
-                              loadingLabel="טוען משך..."
+                              src={part.mediaUrl}
+                              kind={part.mediaKind === 'video' ? 'video' : 'audio'}
+                              fallback={part.mediaKind === 'video' ? 'ללא וידאו' : 'ללא אודיו'}
+                              loadingLabel={
+                                part.mediaKind === 'video' ? 'טוען משך וידאו...' : 'טוען משך אודיו...'
+                              }
                             />
                           </span>
                         </div>
                         <div className="flex items-center justify-between rounded-2xl bg-white/80 px-4 py-3 text-sm text-slate-700 ring-1 ring-white/80">
-                          <span>{part.slideCount} שקופיות מסונכרנות</span>
+                          <span>
+                            {part.mediaKind === 'video'
+                              ? 'וידאו מלא'
+                              : `${part.slideCount} שקופיות מסונכרנות`}
+                          </span>
                           <span>{part.isReady ? 'מוכן' : 'לא מוכן'}</span>
                         </div>
                       </div>
@@ -165,7 +172,7 @@ export default async function SectionPartsPage({
               </div>
             ) : (
               <div className="student-card border border-dashed border-[var(--student-blue)]/40 bg-white/70 p-5 text-sm text-slate-600">
-                אין עדיין תתי-חלקים מוכנים לחלק הזה. רק קטעים עם אודיו ולפחות שקופית אחת מוצגים לתלמיד.
+                אין עדיין תתי-חלקים מוכנים לחלק הזה. רק קטעים עם מדיה פעילה מוצגים לתלמיד.
               </div>
             )}
           </div>

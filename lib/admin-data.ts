@@ -1,6 +1,8 @@
 import { supabase } from '@/lib/supabase'
 import type { AdminSession } from '@/lib/admin-auth'
 import type { LessonPart, LessonSlide, Section, Student } from '@/lib/practice-data'
+import { getLessonMediaKind, type LessonMediaKind } from '@/lib/lesson-media'
+import { createSignedStorageUrl } from '@/lib/storage-files'
 
 export type AdminParasha = {
   id: number
@@ -37,13 +39,21 @@ export type StudentTrackingRow = {
   sectionName: string
   partName: string
   partOrder: number
+  mediaKind: LessonMediaKind
   isVisibleToStudent: boolean
   completionTarget: number
   hasAudio: boolean
+  hasVideo: boolean
   slideCount: number
   practiceCount: number
   completedCount: number
   lastPracticedAt: string | null
+  studentRecording: {
+    id: number
+    durationSeconds: number | null
+    createdAt: string
+    signedUrl: string | null
+  } | null
 }
 
 export type StudentTrackingSummary = {
@@ -127,10 +137,8 @@ export async function getAdminDashboardData(selected?: {
   const visibleStudents =
     session?.role === 'teacher' && session.id
       ? availableStudents.filter((student) => student.admin_id === session.id)
-      : session?.role === 'primary' && session.id
-        ? availableStudents.filter(
-            (student) => student.admin_id === session.id || student.admin_id === null
-          )
+      : session?.role === 'primary'
+        ? availableStudents
       : availableStudents
 
   const selectedParashaId =
@@ -373,7 +381,11 @@ export async function getAdminDashboardData(selected?: {
       const parts = (trackingParts ?? []) as LessonPart[]
       const partIds = parts.map((part) => part.id)
 
-      const [{ data: slidesData, error: slidesError }, { data: practiceEvents, error: practiceEventsError }] =
+      const [
+        { data: slidesData, error: slidesError },
+        { data: practiceEvents, error: practiceEventsError },
+        { data: studentRecordings, error: studentRecordingsError },
+      ] =
         await Promise.all([
           partIds.length
             ? supabase
@@ -389,9 +401,16 @@ export async function getAdminDashboardData(selected?: {
                 .in('lesson_part_id', partIds)
                 .order('created_at', { ascending: false })
             : Promise.resolve({ data: [], error: null }),
+          partIds.length
+            ? supabase
+                .from('student_recordings')
+                .select('id, lesson_part_id, storage_path, duration_seconds, created_at')
+                .eq('student_id', trackingStudent.id)
+                .in('lesson_part_id', partIds)
+            : Promise.resolve({ data: [], error: null }),
         ])
 
-      if (slidesError || practiceEventsError) {
+      if (slidesError || practiceEventsError || studentRecordingsError) {
         return {
           parashot: availableParashot,
           sections: availableSections,
@@ -407,7 +426,7 @@ export async function getAdminDashboardData(selected?: {
           selectedTrackingStudentId,
           trackingSummary,
           parashaSources,
-          error: slidesError ?? practiceEventsError,
+          error: slidesError ?? practiceEventsError ?? studentRecordingsError,
         }
       }
 
@@ -437,27 +456,75 @@ export async function getAdminDashboardData(selected?: {
       }
 
       const groupById = new Map(groups.map((group) => [group.id, group]))
+      const recordingByPartId = new Map<
+        number,
+        {
+          id: number
+          duration_seconds: number | null
+          created_at: string
+          storage_path: string
+        }
+      >()
 
-      trackingSummary = {
-        student: trackingStudent,
-        rows: parts.map((part) => {
+      for (const recording of
+        (studentRecordings ?? []) as Array<{
+          id: number
+          lesson_part_id: number
+          storage_path: string
+          duration_seconds: number | null
+          created_at: string
+        }>) {
+        recordingByPartId.set(recording.lesson_part_id, recording)
+      }
+
+      const rows = await Promise.all(
+        parts.map(async (part) => {
           const events = eventsByPartId.get(part.id) ?? []
           const group = groupById.get(part.lesson_group_id)
+          const recording = recordingByPartId.get(part.id)
+          const mediaKind = getLessonMediaKind(part)
+          let signedUrl: string | null = null
+
+          if (recording?.storage_path) {
+            try {
+              signedUrl = await createSignedStorageUrl(
+                'student-recordings',
+                recording.storage_path
+              )
+            } catch {
+              signedUrl = null
+            }
+          }
 
           return {
             lessonPartId: part.id,
             sectionName: sectionNameById.get(group?.section_id ?? -1) ?? 'ללא חלק',
             partName: part.name,
             partOrder: part.part_order,
+            mediaKind,
             isVisibleToStudent: part.is_visible_to_student ?? true,
             completionTarget: Math.max(part.completion_target ?? 3, 1),
             hasAudio: Boolean(part.audio_url),
+            hasVideo: Boolean(part.video_url),
             slideCount: slideCountByPartId.get(part.id) ?? 0,
             practiceCount: events.length,
             completedCount: events.filter((event) => event.completed).length,
             lastPracticedAt: events[0]?.created_at ?? null,
+            studentRecording: recording
+              ? {
+                  id: recording.id,
+                  durationSeconds: recording.duration_seconds,
+                  createdAt: recording.created_at,
+                  signedUrl,
+                }
+              : null,
           }
-        }),
+        })
+      )
+
+      trackingSummary = {
+        student: trackingStudent,
+        rows,
       }
     } else {
       trackingSummary = {

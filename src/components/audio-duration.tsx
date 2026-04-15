@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 
 type AudioDurationProps = {
   src: string | null | undefined
+  kind?: 'audio' | 'video'
   fallback?: string
   loadingLabel?: string
 }
@@ -16,6 +17,7 @@ function formatDuration(totalSeconds: number) {
 
 export function AudioDuration({
   src,
+  kind = 'audio',
   fallback = 'אין אודיו משויך',
   loadingLabel = 'טוען משך אודיו...',
 }: AudioDurationProps) {
@@ -34,15 +36,19 @@ export function AudioDuration({
       return
     }
 
-    const audio = new Audio()
-    audio.preload = 'metadata'
-    audio.src = src
+    const media =
+      kind === 'video'
+        ? document.createElement('video')
+        : document.createElement('audio')
+
+    media.preload = 'metadata'
+    media.src = src
 
     const handleLoadedMetadata = () => {
-      if (Number.isFinite(audio.duration)) {
+      if (Number.isFinite(media.duration)) {
         setAudioState({
           src,
-          duration: audio.duration,
+          duration: media.duration,
           hasError: false,
         })
       } else {
@@ -62,23 +68,29 @@ export function AudioDuration({
       })
     }
 
-    audio.addEventListener('loadedmetadata', handleLoadedMetadata)
-    audio.addEventListener('error', handleError)
-    audio.load()
+    media.addEventListener('loadedmetadata', handleLoadedMetadata)
+    media.addEventListener('error', handleError)
+    media.load()
 
     return () => {
-      audio.removeEventListener('loadedmetadata', handleLoadedMetadata)
-      audio.removeEventListener('error', handleError)
-      audio.src = ''
+      media.removeEventListener('loadedmetadata', handleLoadedMetadata)
+      media.removeEventListener('error', handleError)
+      media.src = ''
     }
-  }, [src])
+  }, [kind, src])
 
   if (!src) {
     return <span>{fallback}</span>
   }
 
   if (audioState.src === src && audioState.hasError) {
-    return <span>לא הצלחנו לטעון את משך האודיו</span>
+    return (
+      <span>
+        {kind === 'video'
+          ? 'לא הצלחנו לטעון את משך הווידאו'
+          : 'לא הצלחנו לטעון את משך האודיו'}
+      </span>
+    )
   }
 
   if (audioState.src !== src || audioState.duration === null) {

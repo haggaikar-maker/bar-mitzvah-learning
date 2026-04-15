@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { redirect } from 'next/navigation'
 import { getAdminDashboardData } from '@/lib/admin-data'
 import { getAdminSession } from '@/lib/admin-auth'
+import { getLessonMediaKindLabel } from '@/lib/lesson-media'
 import {
   copyParashaStructure,
   deleteAdmin,
@@ -10,6 +11,7 @@ import {
   deleteLessonSlide,
   deleteParasha,
   deleteSection,
+  deleteStudentRecordingFromAdmin,
   deleteStudent,
   ensureLessonGroup,
   logoutAdmin,
@@ -104,6 +106,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   const selectedParasha = parashot.find((parasha) => parasha.id === activeParashaId)
   const selectedSection = sections.find((section) => section.id === activeSectionId)
   const selectedPart = lessonParts.find((part) => part.id === activePartId) ?? null
+  const selectedPartMediaKind =
+    selectedPart?.media_kind === 'video' || selectedPart?.video_url
+      ? 'video'
+      : 'audio_slides'
   const unassignedStudents = students.filter(
     (student) => !managerByStudentId[student.id]
   ).length
@@ -233,9 +239,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     <tr className="text-right text-slate-500">
                       <th className="px-3 py-2 font-semibold">חלק</th>
                       <th className="px-3 py-2 font-semibold">תת־חלק</th>
+                      <th className="px-3 py-2 font-semibold">סוג מדיה</th>
                       <th className="px-3 py-2 font-semibold">חשיפה</th>
                       <th className="px-3 py-2 font-semibold">יעד</th>
                       <th className="px-3 py-2 font-semibold">מדיה</th>
+                      <th className="px-3 py-2 font-semibold">הקלטת תלמיד</th>
                       <th className="px-3 py-2 font-semibold">תרגולים</th>
                       <th className="px-3 py-2 font-semibold">השלמות</th>
                       <th className="px-3 py-2 font-semibold">תרגול אחרון</th>
@@ -250,14 +258,41 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                           <div className="font-medium text-slate-900">{row.partName}</div>
                           <div className="text-xs text-slate-500">סדר {row.partOrder}</div>
                         </td>
+                        <td className="px-3 py-3">{getLessonMediaKindLabel(row.mediaKind)}</td>
                         <td className="px-3 py-3">
                           {row.isVisibleToStudent ? 'מוצג לתלמיד' : 'מוסתר כרגע'}
                         </td>
                         <td className="px-3 py-3">{row.completedCount}/{row.completionTarget}</td>
                         <td className="px-3 py-3">
-                          {row.hasAudio && row.slideCount > 0
-                            ? `מוכן: ${row.slideCount} שקופיות`
-                            : 'חסר אודיו או שקופיות'}
+                          {row.mediaKind === 'video'
+                            ? row.hasVideo
+                              ? 'וידאו מוכן'
+                              : 'חסר וידאו'
+                            : row.hasAudio && row.slideCount > 0
+                              ? `מוכן: ${row.slideCount} שקופיות`
+                              : 'חסר אודיו או שקופיות'}
+                        </td>
+                        <td className="px-3 py-3">
+                          {row.studentRecording ? (
+                            <div className="grid gap-2">
+                              {row.studentRecording.signedUrl ? (
+                                <audio
+                                  controls
+                                  className="w-full min-w-[220px]"
+                                  src={row.studentRecording.signedUrl}
+                                />
+                              ) : (
+                                <div className="text-xs text-slate-500">
+                                  הקלטה קיימת אך לא נוצר קישור מאובטח.
+                                </div>
+                              )}
+                              <div className="text-xs text-slate-500">
+                                {new Date(row.studentRecording.createdAt).toLocaleString('he-IL')}
+                              </div>
+                            </div>
+                          ) : (
+                            'אין הקלטה'
+                          )}
                         </td>
                         <td className="px-3 py-3">{row.practiceCount}</td>
                         <td className="px-3 py-3">{row.completedCount}</td>
@@ -304,6 +339,24 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                 className="w-full rounded-xl bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-900"
                               >
                                 איפוס תרגולים
+                              </button>
+                            </form>
+                            <form action={deleteStudentRecordingFromAdmin}>
+                              <input
+                                type="hidden"
+                                name="student_id"
+                                value={trackingSummary.student.id}
+                              />
+                              <input
+                                type="hidden"
+                                name="lesson_part_id"
+                                value={row.lessonPartId}
+                              />
+                              <button
+                                type="submit"
+                                className="w-full rounded-xl bg-slate-200 px-3 py-2 text-xs font-semibold text-slate-800"
+                              >
+                                מחיקת הקלטה
                               </button>
                             </form>
                           </div>
@@ -662,7 +715,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               <h2 className="text-2xl font-bold text-slate-900">עריכת פרשה ספציפית</h2>
               <p className="mt-2 text-sm text-slate-600">
                 כאן מתבצעת העריכה המרכזית של המנהל: בוחרים פרשה וחלק, מוסיפים
-                תתי־חלקים, משייכים אודיו, ומגדירים שקופיות עם זמן החלפה.
+                תתי־חלקים, משייכים אודיו או וידאו, ומגדירים שקופיות עם זמן החלפה כשצריך.
               </p>
             </div>
           </div>
@@ -784,7 +837,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 <h3 className="text-xl font-bold text-slate-900">תתי־חלקים</h3>
                 <p className="mt-2 text-sm text-slate-600">
                   כאן מגדירים את המבנה של תתי־החלקים. את האודיו והשקופיות של
-                  הקטע הנבחר עורכים בעמודה השנייה בלבד.
+                  הקטע הנבחר, או את הווידאו שלו, עורכים בעמודה השנייה בלבד.
                 </p>
                 <div className="mt-4 space-y-4">
                   {lessonParts.map((part) => (
@@ -812,6 +865,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                       />
                       <input
                         type="hidden"
+                        name="current_video_url"
+                        value={part.video_url ?? ''}
+                      />
+                      <input
+                        type="hidden"
                         name="current_duration_seconds"
                         value={part.duration_seconds ?? ''}
                       />
@@ -827,9 +885,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                           defaultValue={part.part_order}
                           className="rounded-2xl border border-slate-200 px-4 py-3"
                         />
-                        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                          משך האודיו: <AudioDuration src={part.audio_url} />
-                        </div>
+                        <select
+                          name="media_kind"
+                          defaultValue={part.media_kind ?? (part.video_url ? 'video' : 'audio_slides')}
+                          className="rounded-2xl border border-slate-200 px-4 py-3"
+                        >
+                          <option value="audio_slides">אודיו + שקופיות</option>
+                          <option value="video">וידאו</option>
+                        </select>
                       </div>
                       <div className="grid gap-3 md:grid-cols-2">
                         <input
@@ -849,9 +912,23 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         </label>
                       </div>
                       <div className="rounded-2xl bg-white p-3 text-sm text-slate-600 ring-1 ring-slate-200">
-                        {part.audio_url
-                          ? `אודיו משויך: ${part.audio_url}`
-                          : 'אודיו עדיין לא הוגדר. פתח את הקטע בצד שמאל כדי לשייך קובץ.'}
+                        <div>סוג מדיה: {getLessonMediaKindLabel(part.media_kind === 'video' || part.video_url ? 'video' : 'audio_slides')}</div>
+                        <div className="mt-2 break-all">
+                          {part.video_url
+                            ? `וידאו משויך: ${part.video_url}`
+                            : part.audio_url
+                              ? `אודיו משויך: ${part.audio_url}`
+                              : 'עדיין לא הוגדרה מדיה. פתח את הקטע בצד שמאל כדי לשייך קובץ.'}
+                        </div>
+                        <div className="mt-2">
+                          משך המדיה:{' '}
+                          <AudioDuration
+                            src={part.video_url ?? part.audio_url}
+                            kind={part.video_url ? 'video' : 'audio'}
+                            fallback="ללא מדיה"
+                            loadingLabel={part.video_url ? 'טוען משך וידאו...' : 'טוען משך אודיו...'}
+                          />
+                        </div>
                       </div>
                       <label className="flex items-center gap-3 text-sm text-slate-700">
                         <input
@@ -902,6 +979,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     value={selectedSection?.name ?? ''}
                   />
                   <input type="hidden" name="current_audio_url" value="" />
+                  <input type="hidden" name="current_video_url" value="" />
                   <input type="hidden" name="current_duration_seconds" value="" />
                   <input
                     name="name"
@@ -915,9 +993,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                       placeholder="סדר תצוגה"
                       className="rounded-2xl border border-slate-200 px-4 py-3"
                     />
-                    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
-                      משך האודיו יוצג אוטומטית אחרי שיוגדר קובץ לקטע.
-                    </div>
+                    <select
+                      name="media_kind"
+                      defaultValue="audio_slides"
+                      className="rounded-2xl border border-slate-200 px-4 py-3"
+                    >
+                      <option value="audio_slides">אודיו + שקופיות</option>
+                      <option value="video">וידאו</option>
+                    </select>
                   </div>
                   <div className="grid gap-3 md:grid-cols-2">
                     <input
@@ -950,12 +1033,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               </div>
 
               <div>
-                <h3 className="text-xl font-bold text-slate-900">אודיו ושקופיות לקטע הנבחר</h3>
+                <h3 className="text-xl font-bold text-slate-900">מדיה לקטע הנבחר</h3>
                 {activePartId ? (
                   <>
                     <form action={upsertLessonPart} className="mt-4 grid gap-3 rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
                       <h4 className="text-lg font-semibold text-slate-900">
-                        אודיו עבור {selectedPart?.name}
+                        מדיה עבור {selectedPart?.name}
                       </h4>
                       <input type="hidden" name="id" value={selectedPart?.id ?? ''} />
                       <input
@@ -988,6 +1071,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         name="completion_target"
                         value={selectedPart?.completion_target ?? 3}
                       />
+                      <input
+                        type="hidden"
+                        name="media_kind"
+                        value={selectedPartMediaKind}
+                      />
                       {(selectedPart?.is_visible_to_student ?? true) ? (
                         <input type="hidden" name="is_visible_to_student" value="on" />
                       ) : null}
@@ -998,57 +1086,169 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                       />
                       <input
                         type="hidden"
+                        name="current_video_url"
+                        value={selectedPart?.video_url ?? ''}
+                      />
+                      <input
+                        type="hidden"
                         name="current_duration_seconds"
                         value={selectedPart?.duration_seconds ?? ''}
                       />
                       {selectedPart?.is_full_reading ? (
                         <input type="hidden" name="is_full_reading" value="on" />
                       ) : null}
-                      <label className="grid gap-2 text-sm font-medium text-slate-700">
-                        <span>בחירת קובץ אודיו</span>
-                        <input
-                          name="audio_file"
-                          type="file"
-                          accept="audio/*"
-                          className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3"
-                        />
-                      </label>
-                      <input
-                        name="audio_url"
-                        defaultValue={selectedPart?.audio_url ?? ''}
-                        placeholder="/Audio/example.mp3"
-                        className="rounded-2xl border border-slate-200 px-4 py-3"
-                      />
+                      {selectedPartMediaKind === 'video' ? (
+                        <>
+                          <label className="grid gap-2 text-sm font-medium text-slate-700">
+                            <span>בחירת קובץ וידאו</span>
+                            <input
+                              name="video_file"
+                              type="file"
+                              accept="video/*"
+                              className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3"
+                            />
+                          </label>
+                          <input
+                            name="video_url"
+                            defaultValue={selectedPart?.video_url ?? ''}
+                            placeholder="https://.../lesson-video.mp4"
+                            className="rounded-2xl border border-slate-200 px-4 py-3"
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <label className="grid gap-2 text-sm font-medium text-slate-700">
+                            <span>בחירת קובץ אודיו</span>
+                            <input
+                              name="audio_file"
+                              type="file"
+                              accept="audio/*"
+                              className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3"
+                            />
+                          </label>
+                          <input
+                            name="audio_url"
+                            defaultValue={selectedPart?.audio_url ?? ''}
+                            placeholder="/Audio/example.mp3"
+                            className="rounded-2xl border border-slate-200 px-4 py-3"
+                          />
+                        </>
+                      )}
                       <div className="rounded-2xl bg-white p-3 text-sm text-slate-600 ring-1 ring-slate-200">
-                        {selectedPart?.audio_url ?? 'אין עדיין קובץ אודיו משויך'}
+                        {selectedPartMediaKind === 'video'
+                          ? selectedPart?.video_url ?? 'אין עדיין קובץ וידאו משויך'
+                          : selectedPart?.audio_url ?? 'אין עדיין קובץ אודיו משויך'}
                       </div>
                       <div className="rounded-2xl bg-white p-3 text-sm text-slate-700 ring-1 ring-slate-200">
-                        משך האודיו: <AudioDuration src={selectedPart?.audio_url} />
-                      </div>
-                      {selectedPart?.audio_url ? (
-                        <audio
-                          controls
-                          className="w-full"
-                          src={selectedPart.audio_url}
+                        משך המדיה:{' '}
+                        <AudioDuration
+                          src={selectedPart?.video_url ?? selectedPart?.audio_url}
+                          kind={selectedPartMediaKind === 'video' ? 'video' : 'audio'}
+                          fallback={selectedPartMediaKind === 'video' ? 'אין וידאו' : 'אין אודיו'}
+                          loadingLabel={selectedPartMediaKind === 'video' ? 'טוען משך וידאו...' : 'טוען משך אודיו...'}
                         />
+                      </div>
+                      {selectedPartMediaKind === 'video' && selectedPart?.video_url ? (
+                        <video controls className="w-full rounded-2xl" src={selectedPart.video_url} />
+                      ) : selectedPart?.audio_url ? (
+                        <audio controls className="w-full" src={selectedPart.audio_url} />
                       ) : null}
                       <button
                         type="submit"
                         className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
                       >
-                        שמירת אודיו לקטע
+                        {selectedPartMediaKind === 'video' ? 'שמירת וידאו לקטע' : 'שמירת אודיו לקטע'}
                       </button>
                     </form>
 
-                    <div className="mt-4 space-y-4">
-                      {lessonSlides.map((slide) => (
-                        <form key={slide.id} action={upsertLessonSlide} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
-                          <input type="hidden" name="id" value={slide.id} />
-                          <input
-                            type="hidden"
-                            name="lesson_part_id"
-                            value={activePartId}
-                          />
+                    {selectedPartMediaKind === 'audio_slides' ? (
+                      <>
+                        <div className="mt-4 space-y-4">
+                          {lessonSlides.map((slide) => (
+                            <form key={slide.id} action={upsertLessonSlide} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
+                              <input type="hidden" name="id" value={slide.id} />
+                              <input
+                                type="hidden"
+                                name="lesson_part_id"
+                                value={activePartId}
+                              />
+                              <input
+                                type="hidden"
+                                name="parasha_name"
+                                value={selectedParasha?.name ?? ''}
+                              />
+                              <input
+                                type="hidden"
+                                name="section_name"
+                                value={selectedSection?.name ?? ''}
+                              />
+                              <input
+                                type="hidden"
+                                name="part_name"
+                                value={selectedPart?.name ?? ''}
+                              />
+                              <label className="grid gap-2 text-sm font-medium text-slate-700">
+                                <span>בחירת קובץ תמונה</span>
+                                <input
+                                  name="image_file"
+                                  type="file"
+                                  accept="image/*"
+                                  className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3"
+                                />
+                              </label>
+                              <input
+                                name="image_url"
+                                defaultValue={slide.image_url}
+                                placeholder="/images/example.jpg"
+                                className="rounded-2xl border border-slate-200 px-4 py-3"
+                              />
+                              {slide.image_url ? (
+                                <div className="rounded-2xl bg-white p-3 text-sm text-slate-600 ring-1 ring-slate-200">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={slide.image_url}
+                                    alt={slide.image_url}
+                                    className="h-40 w-full rounded-2xl object-contain bg-slate-50"
+                                  />
+                                  <p className="mt-3 break-all">{slide.image_url}</p>
+                                </div>
+                              ) : null}
+                              <div className="grid gap-3 md:grid-cols-2">
+                                <input
+                                  name="slide_index"
+                                  type="number"
+                                  defaultValue={slide.slide_index}
+                                  className="rounded-2xl border border-slate-200 px-4 py-3"
+                                />
+                                <input
+                                  name="start_second"
+                                  type="number"
+                                  defaultValue={slide.start_second}
+                                  className="rounded-2xl border border-slate-200 px-4 py-3"
+                                />
+                              </div>
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <button
+                                  type="submit"
+                                  className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
+                                >
+                                  שמירת שקופית
+                                </button>
+                                <button
+                                  formAction={deleteLessonSlide}
+                                  type="submit"
+                                  className="rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white"
+                                >
+                                  מחיקת שקופית
+                                </button>
+                              </div>
+                            </form>
+                          ))}
+                        </div>
+
+                        <form action={upsertLessonSlide} className="mt-6 grid gap-3 rounded-3xl bg-slate-50 p-4">
+                          <h4 className="text-lg font-semibold text-slate-900">הוספת שקופית</h4>
+                          <input type="hidden" name="lesson_part_id" value={activePartId} />
                           <input
                             type="hidden"
                             name="parasha_name"
@@ -1075,107 +1275,36 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                           </label>
                           <input
                             name="image_url"
-                            defaultValue={slide.image_url}
-                            placeholder="/images/example.jpg"
+                            placeholder="/images/bereshit_r1_1_0.jpg"
                             className="rounded-2xl border border-slate-200 px-4 py-3"
                           />
-                          {slide.image_url ? (
-                            <div className="rounded-2xl bg-white p-3 text-sm text-slate-600 ring-1 ring-slate-200">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={slide.image_url}
-                                alt={slide.image_url}
-                                className="h-40 w-full rounded-2xl object-contain bg-slate-50"
-                              />
-                              <p className="mt-3 break-all">{slide.image_url}</p>
-                            </div>
-                          ) : null}
                           <div className="grid gap-3 md:grid-cols-2">
                             <input
                               name="slide_index"
                               type="number"
-                              defaultValue={slide.slide_index}
+                              placeholder="מספר שקופית"
                               className="rounded-2xl border border-slate-200 px-4 py-3"
                             />
                             <input
                               name="start_second"
                               type="number"
-                              defaultValue={slide.start_second}
+                              placeholder="שנייה להתחלה"
                               className="rounded-2xl border border-slate-200 px-4 py-3"
                             />
                           </div>
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            <button
-                              type="submit"
-                              className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
-                            >
-                              שמירת שקופית
-                            </button>
-                            <button
-                              formAction={deleteLessonSlide}
-                              type="submit"
-                              className="rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white"
-                            >
-                              מחיקת שקופית
-                            </button>
-                          </div>
+                          <button
+                            type="submit"
+                            className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
+                          >
+                            הוספת שקופית
+                          </button>
                         </form>
-                      ))}
-                    </div>
-
-                    <form action={upsertLessonSlide} className="mt-6 grid gap-3 rounded-3xl bg-slate-50 p-4">
-                      <h4 className="text-lg font-semibold text-slate-900">הוספת שקופית</h4>
-                      <input type="hidden" name="lesson_part_id" value={activePartId} />
-                      <input
-                        type="hidden"
-                        name="parasha_name"
-                        value={selectedParasha?.name ?? ''}
-                      />
-                      <input
-                        type="hidden"
-                        name="section_name"
-                        value={selectedSection?.name ?? ''}
-                      />
-                      <input
-                        type="hidden"
-                        name="part_name"
-                        value={selectedPart?.name ?? ''}
-                      />
-                      <label className="grid gap-2 text-sm font-medium text-slate-700">
-                        <span>בחירת קובץ תמונה</span>
-                        <input
-                          name="image_file"
-                          type="file"
-                          accept="image/*"
-                          className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3"
-                        />
-                      </label>
-                      <input
-                        name="image_url"
-                        placeholder="/images/bereshit_r1_1_0.jpg"
-                        className="rounded-2xl border border-slate-200 px-4 py-3"
-                      />
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <input
-                          name="slide_index"
-                          type="number"
-                          placeholder="מספר שקופית"
-                          className="rounded-2xl border border-slate-200 px-4 py-3"
-                        />
-                        <input
-                          name="start_second"
-                          type="number"
-                          placeholder="שנייה להתחלה"
-                          className="rounded-2xl border border-slate-200 px-4 py-3"
-                        />
+                      </>
+                    ) : (
+                      <div className="mt-4 rounded-3xl bg-slate-50 p-4 text-sm text-slate-600">
+                        כשהקטע מוגדר כווידאו, לא משייכים לו אודיו או שקופיות.
                       </div>
-                      <button
-                        type="submit"
-                        className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
-                      >
-                        הוספת שקופית
-                      </button>
-                    </form>
+                    )}
                   </>
                 ) : (
                   <div className="mt-4 rounded-3xl bg-slate-50 p-4 text-sm text-slate-600">

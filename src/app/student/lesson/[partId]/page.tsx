@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import {
   getLessonPageData,
 } from '@/lib/practice-data'
+import { getLessonMediaKind, getLessonMediaUrl } from '@/lib/lesson-media'
 import { requireStudentSession } from '@/lib/student-auth'
 import { logoutUser } from '../../../auth-actions'
 import LessonExperience from './lesson-experience'
@@ -34,6 +35,7 @@ export default async function LessonPage({
     section,
     slides,
     practiceEvents,
+    studentRecording,
     navigation,
     parashaName,
     error,
@@ -92,6 +94,9 @@ export default async function LessonPage({
       </main>
     )
   }
+
+  const mediaKind = getLessonMediaKind(lessonPart)
+  const mediaUrl = getLessonMediaUrl(lessonPart)
 
   return (
     <main className="student-app">
@@ -167,10 +172,12 @@ export default async function LessonPage({
         <div className="mt-6 student-card p-6 shadow-sm ring-1 ring-white/50 sm:p-8">
           <div className="mt-2 grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
             <LessonExperience
-              audioUrl={lessonPart.audio_url}
+              mediaKind={mediaKind}
+              mediaUrl={mediaUrl}
               durationSeconds={lessonPart.duration_seconds}
               initialPracticeEvents={practiceEvents}
               initialSlides={slides}
+              studentRecording={studentRecording}
               lessonPartId={lessonPart.id}
             />
           </div>

@@ -1,4 +1,11 @@
 import { supabase } from '@/lib/supabase'
+import {
+  getLessonMediaKind,
+  getLessonMediaUrl,
+  isLessonPartReady,
+  type LessonMediaKind,
+} from '@/lib/lesson-media'
+import { createSignedStorageUrl } from '@/lib/storage-files'
 
 type Parasha = {
   id: number
@@ -34,9 +41,11 @@ export type LessonPart = {
   name: string
   part_order: number
   is_full_reading: boolean
+  media_kind?: LessonMediaKind | string | null
   is_visible_to_student?: boolean | null
   completion_target?: number | null
   audio_url: string | null
+  video_url?: string | null
   duration_seconds: number | null
 }
 
@@ -56,6 +65,17 @@ export type PracticeEvent = {
   created_at: string
 }
 
+export type StudentRecording = {
+  id: number
+  student_id: number
+  lesson_part_id: number
+  storage_path: string
+  duration_seconds: number | null
+  created_at: string
+  updated_at?: string
+  signed_url?: string | null
+}
+
 export type SectionProgress = Section & {
   totalParts: number
   completedParts: number
@@ -72,6 +92,8 @@ export type PartProgress = LessonPart & {
   slideCount: number
   isReady: boolean
   completionTarget: number
+  mediaKind: LessonMediaKind
+  mediaUrl: string | null
 }
 
 export type LessonNavigation = {
@@ -118,12 +140,53 @@ async function getSlideCountByPartIds(partIds: number[]) {
   }
 }
 
-function isPartReady(part: LessonPart, slideCountByPartId: Map<number, number>) {
-  return (
-    (part.is_visible_to_student ?? true) &&
-    Boolean(part.audio_url) &&
-    (slideCountByPartId.get(part.id) ?? 0) > 0
-  )
+async function getStudentRecording(
+  studentId: number,
+  lessonPartId: number
+) {
+  const { data, error } = await supabase
+    .from('student_recordings')
+    .select('id, student_id, lesson_part_id, storage_path, duration_seconds, created_at, updated_at')
+    .eq('student_id', studentId)
+    .eq('lesson_part_id', lessonPartId)
+    .maybeSingle()
+
+  if (error) {
+    return {
+      recording: null as StudentRecording | null,
+      error,
+    }
+  }
+
+  if (!data) {
+    return {
+      recording: null as StudentRecording | null,
+      error: null,
+    }
+  }
+
+  try {
+    const signedUrl = await createSignedStorageUrl(
+      'student-recordings',
+      data.storage_path
+    )
+
+    return {
+      recording: {
+        ...(data as StudentRecording),
+        signed_url: signedUrl,
+      },
+      error: null,
+    }
+  } catch (error) {
+    return {
+      recording: {
+        ...(data as StudentRecording),
+        signed_url: null,
+      },
+      error: error instanceof Error ? error : new Error('לא הצלחנו ליצור קישור להקלטה.'),
+    }
+  }
 }
 
 function getParashaName(student: Student | null) {
@@ -283,7 +346,9 @@ export async function getStudentDashboardData(studentId?: number | null) {
     }
   }
 
-  const readyParts = parts.filter((part) => isPartReady(part, slideCountByPartId))
+  const readyParts = parts.filter((part) =>
+    isLessonPartReady(part, slideCountByPartId, part.id)
+  )
   const readyPartIds = readyParts.map((part) => part.id)
 
   const { data: practiceEvents, error: practiceError } = readyPartIds.length
@@ -471,7 +536,9 @@ export async function getSectionPageData(
     }
   }
 
-  const readyParts = parts.filter((part) => isPartReady(part, slideCountByPartId))
+  const readyParts = parts.filter((part) =>
+    isLessonPartReady(part, slideCountByPartId, part.id)
+  )
   const readyPartIds = readyParts.map((part) => part.id)
 
   const { data: practiceEvents, error: practiceError } = readyPartIds.length
@@ -517,6 +584,8 @@ export async function getSectionPageData(
         slideCount: slideCountByPartId.get(part.id) ?? 0,
         isReady: true,
         completionTarget: getCompletionTarget(part),
+        mediaKind: getLessonMediaKind(part),
+        mediaUrl: getLessonMediaUrl(part),
       }
     }),
     parashaName: getParashaName(student),
@@ -540,6 +609,7 @@ export async function getLessonPageData(
       section: null,
       slides: [] as LessonSlide[],
       practiceEvents: [] as PracticeEvent[],
+      studentRecording: null as StudentRecording | null,
       navigation: { previous: null, next: null } as LessonNavigation,
       parashaName: getParashaName(student),
       error:
@@ -562,6 +632,7 @@ export async function getLessonPageData(
       section: null,
       slides: [] as LessonSlide[],
       practiceEvents: [] as PracticeEvent[],
+      studentRecording: null as StudentRecording | null,
       navigation: { previous: null, next: null } as LessonNavigation,
       parashaName: getParashaName(student),
       error: lessonPartError ?? new Error('לא נמצא תת-חלק'),
@@ -583,6 +654,7 @@ export async function getLessonPageData(
       section: null,
       slides: [] as LessonSlide[],
       practiceEvents: [] as PracticeEvent[],
+      studentRecording: null as StudentRecording | null,
       navigation: { previous: null, next: null } as LessonNavigation,
       parashaName: getParashaName(student),
       error: lessonGroupError ?? new Error('לא נמצאה קבוצת שיעור'),
@@ -601,6 +673,7 @@ export async function getLessonPageData(
       section: null,
       slides: [] as LessonSlide[],
       practiceEvents: [] as PracticeEvent[],
+      studentRecording: null as StudentRecording | null,
       navigation: { previous: null, next: null } as LessonNavigation,
       parashaName: getParashaName(student),
       error: new Error('השיעור לא שייך לתוכן של התלמיד'),
@@ -612,6 +685,7 @@ export async function getLessonPageData(
     { data: slides, error: slidesError },
     { data: practiceEvents, error: practiceError },
     { data: allGroups, error: allGroupsError },
+    { recording: studentRecording },
   ] =
     await Promise.all([
       supabase
@@ -635,6 +709,7 @@ export async function getLessonPageData(
         .select('id, section_id, sections ( order_index )')
         .eq('admin_id', student.admin_id ?? -1)
         .eq('parasha_id', student.parasha_id ?? -1),
+      getStudentRecording(student.id, lessonPart.id),
     ])
 
   if (allGroupsError) {
@@ -646,6 +721,7 @@ export async function getLessonPageData(
       section: (section ?? null) as Section | null,
       slides: (slides ?? []) as LessonSlide[],
       practiceEvents: (practiceEvents ?? []) as PracticeEvent[],
+      studentRecording,
       navigation: { previous: null, next: null } as LessonNavigation,
       parashaName: getParashaName(student),
       error: allGroupsError,
@@ -675,6 +751,7 @@ export async function getLessonPageData(
       section: (section ?? null) as Section | null,
       slides: (slides ?? []) as LessonSlide[],
       practiceEvents: (practiceEvents ?? []) as PracticeEvent[],
+      studentRecording,
       navigation: { previous: null, next: null } as LessonNavigation,
       parashaName: getParashaName(student),
       error: navigationPartsError,
@@ -695,6 +772,7 @@ export async function getLessonPageData(
       section: (section ?? null) as Section | null,
       slides: (slides ?? []) as LessonSlide[],
       practiceEvents: (practiceEvents ?? []) as PracticeEvent[],
+      studentRecording,
       navigation: { previous: null, next: null } as LessonNavigation,
       parashaName: getParashaName(student),
       error: navigationSlidesError,
@@ -709,7 +787,7 @@ export async function getLessonPageData(
   }
 
   const orderedReadyParts = allNavigationParts
-    .filter((part) => isPartReady(part, navigationSlidesCountByPartId))
+    .filter((part) => isLessonPartReady(part, navigationSlidesCountByPartId, part.id))
     .sort((left, right) => {
       const leftSectionOrder = sectionOrderByGroupId.get(left.lesson_group_id) ?? 0
       const rightSectionOrder = sectionOrderByGroupId.get(right.lesson_group_id) ?? 0
@@ -751,16 +829,20 @@ export async function getLessonPageData(
     section: (section ?? null) as Section | null,
     slides: (slides ?? []) as LessonSlide[],
     practiceEvents: (practiceEvents ?? []) as PracticeEvent[],
+    studentRecording,
     navigation,
     parashaName: getParashaName(student),
-    error:
-      (
-        !(lessonPart.is_visible_to_student ?? true) ||
-        !lessonPart.audio_url ||
-        (slides ?? []).length === 0
-      )
-        ? new Error('הקטע עדיין לא מוכן לתלמיד. נדרש אודיו ולפחות שקופית אחת.')
-        : sectionError ?? slidesError ?? practiceError ?? null,
+    error: !isLessonPartReady(
+      lessonPart as LessonPart,
+      new Map([[lessonPart.id, (slides ?? []).length]]),
+      lessonPart.id
+    )
+      ? new Error(
+          getLessonMediaKind(lessonPart as LessonPart) === 'video'
+            ? 'הקטע עדיין לא מוכן לתלמיד. נדרש קובץ וידאו.'
+            : 'הקטע עדיין לא מוכן לתלמיד. נדרש אודיו ולפחות שקופית אחת.'
+        )
+      : sectionError ?? slidesError ?? practiceError ?? null,
   }
 }
 

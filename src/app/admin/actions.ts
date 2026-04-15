@@ -1,6 +1,5 @@
 'use server'
 
-import path from 'node:path'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import {
@@ -13,7 +12,12 @@ import {
   hashAdminPassword,
   verifyAdminPassword,
 } from '@/lib/admin-security'
-import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { getLessonMediaKind } from '@/lib/lesson-media'
+import {
+  deleteStorageObject,
+  normalizePublicPath,
+  uploadStorageFile,
+} from '@/lib/storage-files'
 import { supabase } from '@/lib/supabase'
 
 function readString(formData: FormData, key: string) {
@@ -45,66 +49,22 @@ async function resolveValidAdminId(adminId: number | null) {
   return data?.id ?? null
 }
 
-function normalizePublicPath(value: string) {
-  if (!value) {
-    return ''
-  }
-
-  const normalized = value
-    .replaceAll('\\', '/')
-    .replace(/^public\//i, '')
-    .replace(/^\/+/, '')
-
-  return normalized ? `/${normalized}` : ''
-}
-
-function slugifySegment(value: string) {
-  const sanitized = value
-    .normalize('NFKD')
-    .replace(/[^\w\s-]/g, '')
-    .trim()
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .toLowerCase()
-
-  return sanitized || 'item'
-}
-
 async function saveUploadedFile(
   file: FormDataEntryValue | null,
   input: {
-    kind: 'audio' | 'images'
+    kind: 'audio' | 'images' | 'videos'
     segments: string[]
     filenameBase: string
   }
 ) {
-  if (!(file instanceof File) || file.size === 0) {
-    return null
-  }
+  const uploaded = await uploadStorageFile(file, {
+    kind: input.kind,
+    segments: input.segments,
+    filenameBase: input.filenameBase,
+    visibility: 'public',
+  })
 
-  const bucketName =
-    input.kind === 'audio'
-      ? process.env.SUPABASE_AUDIO_BUCKET ?? 'lesson-audio'
-      : process.env.SUPABASE_IMAGE_BUCKET ?? 'lesson-images'
-  const extension = path.extname(file.name) || ''
-  const filename = `${slugifySegment(input.filenameBase)}-${Date.now()}${extension.toLowerCase()}`
-  const objectPath = [...input.segments.map(slugifySegment), filename].join('/')
-  const supabaseAdmin = getSupabaseAdmin()
-
-  const { error: uploadError } = await supabaseAdmin.storage
-    .from(bucketName)
-    .upload(objectPath, Buffer.from(await file.arrayBuffer()), {
-      contentType: file.type || undefined,
-      upsert: true,
-    })
-
-  if (uploadError) {
-    throw new Error(`שגיאה בהעלאת הקובץ לאחסון: ${uploadError.message}`)
-  }
-
-  const { data } = supabaseAdmin.storage.from(bucketName).getPublicUrl(objectPath)
-
-  return data.publicUrl
+  return uploaded?.publicUrl ?? null
 }
 
 export async function loginAdmin(formData: FormData) {
@@ -324,8 +284,10 @@ export async function upsertLessonPart(formData: FormData) {
   const audioUrl = readString(formData, 'audio_url')
   const durationSeconds = readNumber(formData, 'duration_seconds')
   const currentAudioUrl = readString(formData, 'current_audio_url')
+  const currentVideoUrl = readString(formData, 'current_video_url')
   const currentDurationSeconds = readNumber(formData, 'current_duration_seconds')
   const isFullReading = readString(formData, 'is_full_reading') === 'on'
+  const mediaKind = readString(formData, 'media_kind') === 'video' ? 'video' : 'audio_slides'
   const isVisibleToStudent = readString(formData, 'is_visible_to_student') === 'on'
   const completionTarget = readNumber(formData, 'completion_target')
   const parashaName = readString(formData, 'parasha_name')
@@ -335,6 +297,12 @@ export async function upsertLessonPart(formData: FormData) {
     segments: [parashaName || 'parasha', sectionName || 'section', name || 'part'],
     filenameBase: `${name || 'part'}-${partOrder ?? '0'}`,
   })
+  const uploadedVideoUrl = await saveUploadedFile(formData.get('video_file'), {
+    kind: 'videos',
+    segments: [parashaName || 'parasha', sectionName || 'section', name || 'part'],
+    filenameBase: `${name || 'part'}-video-${partOrder ?? '0'}`,
+  })
+  const inputVideoUrl = normalizePublicPath(readString(formData, 'video_url'))
 
   if (!lessonGroupId || !name || partOrder === null) {
     throw new Error('יש להזין שם תת-חלק, סדר ומזהה קבוצה.')
@@ -344,16 +312,27 @@ export async function upsertLessonPart(formData: FormData) {
     throw new Error('יעד ההשלמות חייב להיות לפחות 1.')
   }
 
+  const nextAudioUrl =
+    mediaKind === 'audio_slides'
+      ? uploadedAudioUrl ??
+        (normalizePublicPath(audioUrl) || normalizePublicPath(currentAudioUrl) || null)
+      : null
+  const fallbackVideoUrl =
+    inputVideoUrl || normalizePublicPath(currentVideoUrl) || null
+  const nextVideoUrl =
+    mediaKind === 'video'
+      ? uploadedVideoUrl ?? fallbackVideoUrl
+      : null
   const payload = {
     lesson_group_id: lessonGroupId,
     name,
     part_order: partOrder,
     is_full_reading: isFullReading,
+    media_kind: mediaKind,
     is_visible_to_student: isVisibleToStudent,
     completion_target: completionTarget ?? 3,
-    audio_url:
-      uploadedAudioUrl ??
-      (normalizePublicPath(audioUrl) || normalizePublicPath(currentAudioUrl) || null),
+    audio_url: nextAudioUrl,
+    video_url: nextVideoUrl,
     duration_seconds: durationSeconds ?? currentDurationSeconds,
   }
 
@@ -361,11 +340,13 @@ export async function upsertLessonPart(formData: FormData) {
     const { error } = await supabase.from('lesson_parts').update(payload).eq('id', id)
     if (error) {
       if (
+        error.message.includes('media_kind') ||
+        error.message.includes('video_url') ||
         error.message.includes('completion_target') ||
         error.message.includes('is_visible_to_student')
       ) {
         throw new Error(
-          'עמודות היעד או החשיפה עדיין לא קיימות בבסיס הנתונים. צריך להריץ את עדכון ה-SQL החדש.'
+          'עמודות המדיה, היעד או החשיפה עדיין לא קיימות בבסיס הנתונים. צריך להריץ את עדכון ה-SQL החדש.'
         )
       }
 
@@ -375,15 +356,28 @@ export async function upsertLessonPart(formData: FormData) {
     const { error } = await supabase.from('lesson_parts').insert(payload)
     if (error) {
       if (
+        error.message.includes('media_kind') ||
+        error.message.includes('video_url') ||
         error.message.includes('completion_target') ||
         error.message.includes('is_visible_to_student')
       ) {
         throw new Error(
-          'עמודות היעד או החשיפה עדיין לא קיימות בבסיס הנתונים. צריך להריץ את עדכון ה-SQL החדש.'
+          'עמודות המדיה, היעד או החשיפה עדיין לא קיימות בבסיס הנתונים. צריך להריץ את עדכון ה-SQL החדש.'
         )
       }
 
       throw new Error(error.message)
+    }
+  }
+
+  if (id && mediaKind === 'video') {
+    const { error: deleteSlidesError } = await supabase
+      .from('lesson_slides')
+      .delete()
+      .eq('lesson_part_id', id)
+
+    if (deleteSlidesError) {
+      throw new Error(deleteSlidesError.message)
     }
   }
 
@@ -436,6 +430,59 @@ export async function resetStudentPartProgress(formData: FormData) {
   revalidatePath('/student')
 }
 
+export async function deleteStudentRecordingFromAdmin(formData: FormData) {
+  const session = await requireAdminSession()
+
+  const studentId = readNumber(formData, 'student_id')
+  const lessonPartId = readNumber(formData, 'lesson_part_id')
+
+  if (!studentId || !lessonPartId) {
+    throw new Error('חסרים מזהי תלמיד או תת־חלק למחיקת ההקלטה.')
+  }
+
+  const { data: student, error: studentError } = await supabase
+    .from('students')
+    .select('id, admin_id')
+    .eq('id', studentId)
+    .maybeSingle()
+
+  if (studentError || !student) {
+    throw new Error(studentError?.message ?? 'התלמיד לא נמצא.')
+  }
+
+  if (session.role !== 'primary' && student.admin_id !== session.id) {
+    throw new Error('אין הרשאה למחוק הקלטה של תלמיד זה.')
+  }
+
+  const { data: recording, error: recordingError } = await supabase
+    .from('student_recordings')
+    .select('id, storage_path')
+    .eq('student_id', studentId)
+    .eq('lesson_part_id', lessonPartId)
+    .maybeSingle()
+
+  if (recordingError) {
+    throw new Error(recordingError.message)
+  }
+
+  if (recording?.storage_path) {
+    await deleteStorageObject('student-recordings', recording.storage_path)
+  }
+
+  const { error } = await supabase
+    .from('student_recordings')
+    .delete()
+    .eq('student_id', studentId)
+    .eq('lesson_part_id', lessonPartId)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  revalidatePath('/admin')
+  revalidatePath('/student')
+}
+
 export async function upsertLessonSlide(formData: FormData) {
   await requireAdminSession()
 
@@ -452,6 +499,20 @@ export async function upsertLessonSlide(formData: FormData) {
     segments: [parashaName || 'parasha', sectionName || 'section', partName || 'part'],
     filenameBase: `${partName || 'slide'}-${slideIndex ?? '0'}`,
   })
+
+  const { data: lessonPart, error: lessonPartError } = await supabase
+    .from('lesson_parts')
+    .select('id, media_kind, video_url')
+    .eq('id', lessonPartId ?? -1)
+    .maybeSingle()
+
+  if (lessonPartError) {
+    throw new Error(lessonPartError.message)
+  }
+
+  if (getLessonMediaKind(lessonPart) === 'video') {
+    throw new Error('לא ניתן לשייך שקופיות לתת־חלק שמוגדר כווידאו.')
+  }
 
   const finalImageUrl = uploadedImageUrl ?? normalizePublicPath(imageUrl)
 
@@ -641,7 +702,7 @@ export async function copyParashaStructure(formData: FormData) {
     const { data: sourceParts, error: sourcePartsError } = await supabase
       .from('lesson_parts')
       .select(
-        'id, lesson_group_id, name, part_order, is_full_reading, audio_url, duration_seconds'
+        'id, lesson_group_id, name, part_order, is_full_reading, media_kind, is_visible_to_student, completion_target, audio_url, video_url, duration_seconds'
       )
       .in('lesson_group_id', sourceGroupIds)
       .order('part_order', { ascending: true })
@@ -775,7 +836,11 @@ export async function copyParashaStructure(formData: FormData) {
           name: part.name,
           part_order: part.part_order,
           is_full_reading: part.is_full_reading,
+          media_kind: part.media_kind ?? 'audio_slides',
+          is_visible_to_student: part.is_visible_to_student ?? true,
+          completion_target: part.completion_target ?? 3,
           audio_url: part.audio_url,
+          video_url: part.video_url ?? null,
           duration_seconds: part.duration_seconds,
         })
         .select('id')

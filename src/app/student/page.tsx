@@ -62,7 +62,7 @@ export default async function StudentPage() {
                 {student.name}, מתחילים לעבוד חכם על הקריאה שלך
               </h1>
               <p className="mt-4 max-w-2xl text-base leading-8 text-white/90 sm:text-lg">
-                כל חלק שמופיע כאן כבר מוכן עם אודיו ושקופיות. אפשר להתקדם בקצב שלך,
+                כל חלק שמופיע כאן כבר מוכן עם מדיה פעילה. אפשר להתקדם בקצב שלך,
                 לחזור לקטעים קודמים, ולראות בכל רגע כמה עוד נשאר עד היעד.
               </p>
             </div>
@@ -186,7 +186,7 @@ export default async function StudentPage() {
                 </div>
               ) : (
                 <div className="student-card border border-dashed border-[var(--student-blue)]/40 bg-white/70 p-5 text-sm text-slate-600">
-                  עדיין אין לתלמיד הזה חלקים מוכנים עם אודיו ושקופיות.
+                  עדיין אין לתלמיד הזה חלקים מוכנים עם מדיה פעילה.
                 </div>
               )}
             </div>

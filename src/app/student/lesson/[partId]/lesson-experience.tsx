@@ -68,17 +68,6 @@ export default function LessonExperience({
   const [recordingPreviewUrl, setRecordingPreviewUrl] = useState<string | null>(
     studentRecording?.signed_url ?? null
   )
-  const [recordingMeta, setRecordingMeta] = useState<{
-    createdAt: string
-    durationSeconds: number | null
-  } | null>(
-    studentRecording
-      ? {
-          createdAt: studentRecording.created_at,
-          durationSeconds: studentRecording.duration_seconds,
-        }
-      : null
-  )
 
   const activeSlideIndex =
     initialSlides.findLastIndex((slide) => slide.start_second <= currentTime) || 0
@@ -297,17 +286,13 @@ export default function LessonExperience({
         formData.set('durationSeconds', String(Math.round(explicitDurationSeconds)))
       }
 
-      const result = await saveStudentRecording(formData)
+      await saveStudentRecording(formData)
 
       if (recordingPreviewUrl && recordingPreviewUrl.startsWith('blob:')) {
         URL.revokeObjectURL(recordingPreviewUrl)
       }
 
       setRecordingPreviewUrl(URL.createObjectURL(file))
-      setRecordingMeta({
-        createdAt: result.createdAt,
-        durationSeconds: result.durationSeconds,
-      })
       setRecordingStatus('ההקלטה נשמרה בהצלחה.')
     } catch (error) {
       setRecordingStatus(
@@ -452,7 +437,6 @@ export default function LessonExperience({
       }
 
       setRecordingPreviewUrl(null)
-      setRecordingMeta(null)
       setRecordingStatus('ההקלטה נמחקה.')
     } catch (error) {
       setRecordingStatus(
@@ -465,100 +449,6 @@ export default function LessonExperience({
 
   return (
     <>
-      <div className="space-y-4">
-        {mediaKind === 'video' ? (
-          <div className="student-audio-panel p-4 ring-1 ring-white/70">
-            {mediaUrl ? (
-              <video
-                ref={videoRef}
-                controls
-                className="w-full rounded-[24px] bg-black shadow-2xl shadow-slate-900/10"
-                onEnded={handleEnded}
-                onPause={handlePause}
-                onPlay={handleAudioPlay}
-                onSeeking={handleSeeking}
-                onTimeUpdate={handleTimeUpdate}
-                src={mediaUrl}
-              />
-            ) : (
-              <div className="flex min-h-[420px] items-center justify-center rounded-[24px] bg-white/85 text-center text-slate-500">
-                אין וידאו לתת-החלק הזה
-              </div>
-            )}
-          </div>
-        ) : (
-          <>
-            <button
-              type="button"
-              onClick={() => openViewer(Math.max(activeSlideIndex, 0))}
-              className="student-audio-panel block w-full p-4 text-right ring-1 ring-white/70"
-            >
-              {activeSlide ? (
-                <img
-                  src={activeSlide.image_url}
-                  alt={`Slide ${activeSlide.slide_index}`}
-                  className="w-full rounded-[24px] object-contain shadow-2xl shadow-slate-900/10"
-                />
-              ) : (
-                <div className="flex min-h-[420px] items-center justify-center rounded-[24px] bg-white/85 text-center text-slate-500">
-                  אין תמונה לתת-החלק הזה
-                </div>
-              )}
-            </button>
-
-            <div className="student-card p-4 ring-1 ring-white/70">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <h4 className="text-lg font-black text-slate-900">שקופיות מסונכרנות</h4>
-                  <p className="text-sm text-slate-500">
-                    אפשר לפתוח גדול, או לקפוץ ישירות לשנייה המתאימה בהקלטה.
-                  </p>
-                </div>
-                <span className="student-badge bg-[var(--student-cream)] text-slate-700 ring-1 ring-amber-100">
-                  {initialSlides.length} תמונות
-                </span>
-              </div>
-
-              {initialSlides.length > 0 ? (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {initialSlides.map((slide, index) => {
-                    const isActive = index === activeSlideIndex
-
-                    return (
-                      <button
-                        key={slide.id}
-                        type="button"
-                        onClick={() => jumpToSlide(index)}
-                        onDoubleClick={() => openViewer(index)}
-                        className={`overflow-hidden rounded-[24px] bg-white text-right shadow-lg shadow-slate-900/5 ring-1 transition ${
-                          isActive
-                            ? 'ring-2 ring-[var(--student-orange)]'
-                            : 'ring-slate-200 hover:ring-[var(--student-blue)]'
-                        }`}
-                      >
-                        <img
-                          src={slide.image_url}
-                          alt={`שקופית ${slide.slide_index}`}
-                          className="h-40 w-full object-cover"
-                        />
-                        <div className="flex items-center justify-between px-4 py-3 text-sm text-slate-600">
-                          <span>שקופית {slide.slide_index}</span>
-                          <span>{slide.start_second} שנ׳</span>
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              ) : (
-                <div className="rounded-[24px] bg-white p-4 text-sm text-slate-500 ring-1 ring-slate-200">
-                  עדיין לא הוגדרו תמונות לקטע הזה.
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
       <div className="space-y-4">
         <div className="student-audio-panel p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
@@ -584,10 +474,18 @@ export default function LessonExperience({
               <source src={mediaUrl} type="audio/mpeg" />
               הדפדפן שלך לא תומך בנגן אודיו
             </audio>
-          ) : mediaKind === 'video' ? (
-            <p className="text-sm text-slate-500">
-              הווידאו מופיע בצד שמאל, והשלמה תסומן רק אם הוא נוגן ברצף מלא.
-            </p>
+          ) : mediaKind === 'video' && mediaUrl ? (
+            <video
+              ref={videoRef}
+              controls
+              className="w-full rounded-[24px] bg-black shadow-2xl shadow-slate-900/10"
+              onEnded={handleEnded}
+              onPause={handlePause}
+              onPlay={handleAudioPlay}
+              onSeeking={handleSeeking}
+              onTimeUpdate={handleTimeUpdate}
+              src={mediaUrl}
+            />
           ) : (
             <p className="text-sm text-slate-500">עדיין לא הוגדר קובץ מדיה.</p>
           )}
@@ -597,39 +495,29 @@ export default function LessonExperience({
           </p>
         </div>
 
-        <div className="student-card p-4">
-          <p className="text-sm font-semibold text-slate-600">סטטיסטיקה</p>
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <div className="rounded-[24px] bg-white p-4 text-center ring-1 ring-slate-200">
-              <p className="text-xs text-slate-400">תרגולים</p>
-              <p className="mt-2 text-3xl font-black text-slate-900">
-                {practiceEvents.length}
-              </p>
-            </div>
-            <div className="rounded-[24px] bg-white p-4 text-center ring-1 ring-slate-200">
-              <p className="text-xs text-slate-400">השלמות</p>
-              <p className="mt-2 text-3xl font-black text-slate-900">
-                {completedCount}
-              </p>
-            </div>
-          </div>
-
-          <p className="mt-4 text-sm text-slate-500">
-            משך: {mediaDuration ? formatDuration(mediaDuration) : 'לא הוגדר'}
-          </p>
-          <p className="mt-2 text-sm text-slate-500">
-            זמן נוכחי: {Math.floor(currentTime)} שנ׳
-          </p>
-        </div>
+        {mediaKind === 'audio_slides' ? (
+          <button
+            type="button"
+            onClick={() => openViewer(Math.max(activeSlideIndex, 0))}
+            className="student-audio-panel block w-full p-4 text-right ring-1 ring-white/70"
+          >
+            {activeSlide ? (
+              <img
+                src={activeSlide.image_url}
+                alt={`Slide ${activeSlide.slide_index}`}
+                className="w-full rounded-[24px] object-contain shadow-2xl shadow-slate-900/10"
+              />
+            ) : (
+              <div className="flex min-h-[320px] items-center justify-center rounded-[24px] bg-white/85 text-center text-slate-500">
+                אין תמונה לתת-החלק הזה
+              </div>
+            )}
+          </button>
+        ) : null}
 
         <div className="student-card p-4">
           <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-slate-700">הקלטה שלי</p>
-              <p className="mt-1 text-sm text-slate-500">
-                אפשר להקליט או להעלות קובץ אחד בלבד לקטע הזה, עד פי 2 מאורך {mediaKind === 'video' ? 'הווידאו' : 'האודיו'}.
-              </p>
-            </div>
+            <p className="text-sm font-semibold text-slate-700">הקלטה שלי</p>
             {maxRecordingSeconds ? (
               <span className="student-badge bg-[var(--student-cream)] text-slate-700 ring-1 ring-amber-100">
                 מקסימום {formatDuration(maxRecordingSeconds)}
@@ -671,14 +559,7 @@ export default function LessonExperience({
           {recordingPreviewUrl ? (
             <div className="mt-4 rounded-[24px] bg-white p-4 ring-1 ring-slate-200">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-slate-700">ההקלטה השמורה שלך</p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {recordingMeta?.createdAt
-                      ? `נשמרה ב־${new Date(recordingMeta.createdAt).toLocaleString('he-IL')}`
-                      : 'ההקלטה זמינה להשמעה'}
-                  </p>
-                </div>
+                <div className="text-sm font-semibold text-slate-700">ההקלטה שלי</div>
                 <button
                   type="button"
                   onClick={() => {
@@ -696,10 +577,6 @@ export default function LessonExperience({
               <audio controls className="w-full" src={recordingPreviewUrl}>
                 הדפדפן שלך לא תומך בהשמעת ההקלטה.
               </audio>
-
-              <p className="mt-3 text-xs text-slate-500">
-                משך: {recordingMeta?.durationSeconds ? formatDuration(recordingMeta.durationSeconds) : 'לא זוהה'}
-              </p>
             </div>
           ) : (
             <div className="mt-4 rounded-[24px] bg-white p-4 text-sm text-slate-500 ring-1 ring-slate-200">
@@ -715,30 +592,79 @@ export default function LessonExperience({
         </div>
 
         <div className="student-card p-4">
-          <p className="text-sm font-semibold text-slate-700">היסטוריית תרגול</p>
-
-          {practiceEvents.length > 0 ? (
-            <div className="mt-4 space-y-3">
-              {practiceEvents.slice(0, 6).map((event) => (
-                <div
-                  key={event.id}
-                  className="rounded-[24px] bg-white px-4 py-3 text-sm text-slate-600 ring-1 ring-slate-200"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span>{event.completed ? 'הושלם אוטומטית' : 'התחיל תרגול'}</span>
-                    <span>{new Date(event.created_at).toLocaleString('he-IL')}</span>
-                  </div>
-                </div>
-              ))}
+          <p className="text-sm font-semibold text-slate-600">סטטיסטיקה</p>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="rounded-[24px] bg-white p-4 text-center ring-1 ring-slate-200">
+              <p className="text-xs text-slate-400">תרגולים</p>
+              <p className="mt-2 text-3xl font-black text-slate-900">
+                {practiceEvents.length}
+              </p>
             </div>
-          ) : (
-            <p className="mt-3 text-sm text-slate-500">אין עדיין אירועי תרגול לקטע הזה.</p>
-          )}
+            <div className="rounded-[24px] bg-white p-4 text-center ring-1 ring-slate-200">
+              <p className="text-xs text-slate-400">השלמות</p>
+              <p className="mt-2 text-3xl font-black text-slate-900">
+                {completedCount}
+              </p>
+            </div>
+          </div>
+
+          <p className="mt-4 text-sm text-slate-500">
+            משך: {mediaDuration ? formatDuration(mediaDuration) : 'לא הוגדר'}
+          </p>
+          <p className="mt-2 text-sm text-slate-500">
+            זמן נוכחי: {Math.floor(currentTime)} שנ׳
+          </p>
         </div>
 
         {statusMessage ? (
           <div className="rounded-[24px] bg-blue-50 p-4 text-sm text-blue-900 ring-1 ring-blue-200">
             {statusMessage}
+          </div>
+        ) : null}
+
+        {mediaKind === 'audio_slides' ? (
+          <div className="student-card p-4 ring-1 ring-white/70">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <span className="student-badge bg-[var(--student-cream)] text-slate-700 ring-1 ring-amber-100">
+                {initialSlides.length} תמונות
+              </span>
+            </div>
+
+            {initialSlides.length > 0 ? (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {initialSlides.map((slide, index) => {
+                  const isActive = index === activeSlideIndex
+
+                  return (
+                    <button
+                      key={slide.id}
+                      type="button"
+                      onClick={() => jumpToSlide(index)}
+                      onDoubleClick={() => openViewer(index)}
+                      className={`overflow-hidden rounded-[24px] bg-white text-right shadow-lg shadow-slate-900/5 ring-1 transition ${
+                        isActive
+                          ? 'ring-2 ring-[var(--student-orange)]'
+                          : 'ring-slate-200 hover:ring-[var(--student-blue)]'
+                      }`}
+                      >
+                      <img
+                        src={slide.image_url}
+                        alt={`שקופית ${slide.slide_index}`}
+                        className="h-28 w-full object-cover sm:h-32"
+                      />
+                      <div className="flex items-center justify-between px-3 py-2 text-xs text-slate-600">
+                        <span>{slide.slide_index}</span>
+                        <span>{slide.start_second} שנ׳</span>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="rounded-[24px] bg-white p-4 text-sm text-slate-500 ring-1 ring-slate-200">
+                עדיין לא הוגדרו תמונות לקטע הזה.
+              </div>
+            )}
           </div>
         ) : null}
       </div>

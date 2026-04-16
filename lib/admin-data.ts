@@ -41,6 +41,7 @@ export type StudentTrackingRow = {
   partOrder: number
   mediaKind: LessonMediaKind
   isVisibleToStudent: boolean
+  baseVisibility: boolean
   completionTarget: number
   hasAudio: boolean
   hasVideo: boolean
@@ -385,6 +386,7 @@ export async function getAdminDashboardData(selected?: {
         { data: slidesData, error: slidesError },
         { data: practiceEvents, error: practiceEventsError },
         { data: studentRecordings, error: studentRecordingsError },
+        { data: partSettings, error: partSettingsError },
       ] =
         await Promise.all([
           partIds.length
@@ -408,9 +410,16 @@ export async function getAdminDashboardData(selected?: {
                 .eq('student_id', trackingStudent.id)
                 .in('lesson_part_id', partIds)
             : Promise.resolve({ data: [], error: null }),
+          partIds.length
+            ? supabase
+                .from('student_lesson_part_settings')
+                .select('lesson_part_id, is_visible_to_student')
+                .eq('student_id', trackingStudent.id)
+                .in('lesson_part_id', partIds)
+            : Promise.resolve({ data: [], error: null }),
         ])
 
-      if (slidesError || practiceEventsError || studentRecordingsError) {
+      if (slidesError || practiceEventsError || studentRecordingsError || partSettingsError) {
         return {
           parashot: availableParashot,
           sections: availableSections,
@@ -426,7 +435,7 @@ export async function getAdminDashboardData(selected?: {
           selectedTrackingStudentId,
           trackingSummary,
           parashaSources,
-          error: slidesError ?? practiceEventsError ?? studentRecordingsError,
+          error: slidesError ?? practiceEventsError ?? studentRecordingsError ?? partSettingsError,
         }
       }
 
@@ -477,6 +486,13 @@ export async function getAdminDashboardData(selected?: {
         recordingByPartId.set(recording.lesson_part_id, recording)
       }
 
+      const studentVisibilityByPartId = new Map<number, boolean>(
+        ((partSettings ?? []) as Array<{
+          lesson_part_id: number
+          is_visible_to_student: boolean
+        }>).map((row) => [row.lesson_part_id, row.is_visible_to_student])
+      )
+
       const rows = await Promise.all(
         parts.map(async (part) => {
           const events = eventsByPartId.get(part.id) ?? []
@@ -502,7 +518,10 @@ export async function getAdminDashboardData(selected?: {
             partName: part.name,
             partOrder: part.part_order,
             mediaKind,
-            isVisibleToStudent: part.is_visible_to_student ?? true,
+            isVisibleToStudent:
+              (part.is_visible_to_student ?? true) &&
+              (studentVisibilityByPartId.get(part.id) ?? true),
+            baseVisibility: part.is_visible_to_student ?? true,
             completionTarget: Math.max(part.completion_target ?? 3, 1),
             hasAudio: Boolean(part.audio_url),
             hasVideo: Boolean(part.video_url),

@@ -65,6 +65,11 @@ export type PracticeEvent = {
   created_at: string
 }
 
+type StudentLessonPartSetting = {
+  lesson_part_id: number
+  is_visible_to_student: boolean
+}
+
 export type StudentRecording = {
   id: number
   student_id: number
@@ -103,6 +108,38 @@ export type LessonNavigation = {
 
 function getCompletionTarget(part: LessonPart | null | undefined) {
   return Math.max(part?.completion_target ?? 3, 1)
+}
+
+async function getStudentPartVisibilityMap(studentId: number, partIds: number[]) {
+  if (partIds.length === 0) {
+    return {
+      visibilityByPartId: new Map<number, boolean>(),
+      error: null,
+    }
+  }
+
+  const { data, error } = await supabase
+    .from('student_lesson_part_settings')
+    .select('lesson_part_id, is_visible_to_student')
+    .eq('student_id', studentId)
+    .in('lesson_part_id', partIds)
+
+  if (error) {
+    return {
+      visibilityByPartId: new Map<number, boolean>(),
+      error,
+    }
+  }
+
+  return {
+    visibilityByPartId: new Map(
+      ((data ?? []) as StudentLessonPartSetting[]).map((row) => [
+        row.lesson_part_id,
+        row.is_visible_to_student,
+      ])
+    ),
+    error: null,
+  }
 }
 
 async function getSlideCountByPartIds(partIds: number[]) {
@@ -346,8 +383,30 @@ export async function getStudentDashboardData(studentId?: number | null) {
     }
   }
 
+  const { visibilityByPartId, error: visibilityError } =
+    await getStudentPartVisibilityMap(student.id, partIds)
+
+  if (visibilityError) {
+    return {
+      student,
+      students,
+      sections: [] as SectionProgress[],
+      parashaName: getParashaName(student),
+      error: visibilityError,
+    }
+  }
+
   const readyParts = parts.filter((part) =>
-    isLessonPartReady(part, slideCountByPartId, part.id)
+    isLessonPartReady(
+      {
+        ...part,
+        is_visible_to_student:
+          (part.is_visible_to_student ?? true) &&
+          (visibilityByPartId.get(part.id) ?? true),
+      },
+      slideCountByPartId,
+      part.id
+    )
   )
   const readyPartIds = readyParts.map((part) => part.id)
 
@@ -536,8 +595,31 @@ export async function getSectionPageData(
     }
   }
 
+  const { visibilityByPartId, error: visibilityError } =
+    await getStudentPartVisibilityMap(student.id, partIds)
+
+  if (visibilityError) {
+    return {
+      student,
+      students,
+      section: section as Section,
+      parts: [] as PartProgress[],
+      parashaName: getParashaName(student),
+      error: visibilityError,
+    }
+  }
+
   const readyParts = parts.filter((part) =>
-    isLessonPartReady(part, slideCountByPartId, part.id)
+    isLessonPartReady(
+      {
+        ...part,
+        is_visible_to_student:
+          (part.is_visible_to_student ?? true) &&
+          (visibilityByPartId.get(part.id) ?? true),
+      },
+      slideCountByPartId,
+      part.id
+    )
   )
   const readyPartIds = readyParts.map((part) => part.id)
 
@@ -779,6 +861,25 @@ export async function getLessonPageData(
     }
   }
 
+  const { visibilityByPartId: navigationVisibilityByPartId, error: navigationVisibilityError } =
+    await getStudentPartVisibilityMap(student.id, navigationPartIds)
+
+  if (navigationVisibilityError) {
+    return {
+      student,
+      students,
+      lessonPart: lessonPart as LessonPart,
+      lessonGroup: lessonGroup as LessonGroup,
+      section: (section ?? null) as Section | null,
+      slides: (slides ?? []) as LessonSlide[],
+      practiceEvents: (practiceEvents ?? []) as PracticeEvent[],
+      studentRecording,
+      navigation: { previous: null, next: null } as LessonNavigation,
+      parashaName: getParashaName(student),
+      error: navigationVisibilityError,
+    }
+  }
+
   const sectionOrderByGroupId = new Map<number, number>()
 
   for (const group of groupRows) {
@@ -787,7 +888,18 @@ export async function getLessonPageData(
   }
 
   const orderedReadyParts = allNavigationParts
-    .filter((part) => isLessonPartReady(part, navigationSlidesCountByPartId, part.id))
+    .filter((part) =>
+      isLessonPartReady(
+        {
+          ...part,
+          is_visible_to_student:
+            (part.is_visible_to_student ?? true) &&
+            (navigationVisibilityByPartId.get(part.id) ?? true),
+        },
+        navigationSlidesCountByPartId,
+        part.id
+      )
+    )
     .sort((left, right) => {
       const leftSectionOrder = sectionOrderByGroupId.get(left.lesson_group_id) ?? 0
       const rightSectionOrder = sectionOrderByGroupId.get(right.lesson_group_id) ?? 0
@@ -833,7 +945,12 @@ export async function getLessonPageData(
     navigation,
     parashaName: getParashaName(student),
     error: !isLessonPartReady(
-      lessonPart as LessonPart,
+      {
+        ...(lessonPart as LessonPart),
+        is_visible_to_student:
+          ((lessonPart as LessonPart).is_visible_to_student ?? true) &&
+          (navigationVisibilityByPartId.get(lessonPart.id) ?? true),
+      },
       new Map([[lessonPart.id, (slides ?? []).length]]),
       lessonPart.id
     )

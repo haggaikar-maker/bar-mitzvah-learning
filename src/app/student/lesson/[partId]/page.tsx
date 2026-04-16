@@ -37,7 +37,6 @@ export default async function LessonPage({
     practiceEvents,
     studentRecording,
     navigation,
-    parashaName,
     error,
   } = await getLessonPageData(partIdNumber, session.id)
   const errorMessage = error instanceof Error ? error.message : null
@@ -80,10 +79,10 @@ export default async function LessonPage({
           <div className="student-card mx-auto max-w-3xl p-6 sm:p-8">
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <Link
-              href={`/student/section/${lessonGroup.section_id}`}
+              href="/student"
               className="student-floating-chip inline-block px-4 py-2 text-sm font-semibold text-slate-700"
             >
-              חזרה לתת-חלקים
+              חזרה לקריאות
             </Link>
           </div>
 
@@ -103,27 +102,11 @@ export default async function LessonPage({
       <div className="student-shell">
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <Link
-            href={`/student/section/${lessonGroup.section_id}`}
+            href="/student"
             className="student-floating-chip inline-block px-4 py-2 text-sm font-semibold text-slate-700"
           >
-            חזרה לתת-חלקים
+            חזרה לקריאות
           </Link>
-          {navigation.previous ? (
-            <Link
-              href={`/student/lesson/${navigation.previous.id}`}
-              className="student-floating-chip inline-block px-4 py-2 text-sm font-semibold text-slate-700"
-            >
-              לחלק הקודם
-            </Link>
-          ) : null}
-          {navigation.next ? (
-            <Link
-              href={`/student/lesson/${navigation.next.id}`}
-              className="inline-block rounded-xl bg-[var(--student-orange)] px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-orange-400/25"
-            >
-              לחלק הבא
-            </Link>
-          ) : null}
           <form action={logoutUser}>
             <button
               type="submit"
@@ -135,34 +118,48 @@ export default async function LessonPage({
         </div>
 
         <section className="student-hero">
-          <div className="relative z-10 grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
-            <div className="text-white">
-              <span className="student-badge bg-white/16 text-white ring-1 ring-white/20">
-                הקשבה חכמה ומרוכזת
-              </span>
-              <p className="mt-5 text-sm font-semibold text-white/85">פרשה</p>
-              <h1 className="mt-2 text-3xl font-black sm:text-4xl">
-                {parashaName ?? 'לא הוגדרה פרשה'}
-              </h1>
-              <div className="mt-5 rounded-[24px] bg-white/12 p-4 backdrop-blur-sm">
-                <p className="text-sm text-white/75">חלק</p>
-                <h2 className="mt-1 text-2xl font-black">{section.name}</h2>
-                <p className="mt-4 text-sm text-white/75">תת־חלק</p>
-                <h3 className="mt-1 text-4xl font-black">{lessonPart.name}</h3>
-                <p className="mt-3 text-sm leading-7 text-white/85">
-                  אפשר לעבור ישר לקטע הבא או לחזור לקטע קודם לפי סדר הקריאה.
-                </p>
-              </div>
-            </div>
-
-            <div className="student-glass-card p-5 text-[var(--student-ink)]">
-              <p className="text-sm font-semibold text-slate-500">ניווט מהיר</p>
-              <div className="mt-4 grid gap-3">
-                <div className="rounded-2xl bg-white/85 px-4 py-3 text-sm text-slate-700">
-                  קטע קודם: {navigation.previous?.name ?? 'זה הקטע הראשון כרגע'}
+          <div className="relative z-10 text-white">
+            <div className="rounded-[24px] bg-white/12 p-4 backdrop-blur-sm">
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+                <div className="min-w-0 text-right">
+                  {navigation.previous ? (
+                    <Link
+                      href={`/student/lesson/${navigation.previous.id}`}
+                      className="block rounded-2xl bg-white/10 px-3 py-2 text-white transition hover:bg-white/20"
+                    >
+                      <div className="text-[11px] text-white/70">הקודם</div>
+                      <div className="truncate text-sm font-semibold">
+                        {navigation.previous.name}
+                      </div>
+                    </Link>
+                  ) : (
+                    <div className="rounded-2xl bg-white/5 px-3 py-2 text-white/50">
+                      <div className="text-[11px]">הקודם</div>
+                      <div className="truncate text-sm font-semibold">-</div>
+                    </div>
+                  )}
                 </div>
-                <div className="rounded-2xl bg-white/85 px-4 py-3 text-sm text-slate-700">
-                  קטע הבא: {navigation.next?.name ?? 'זה הקטע האחרון כרגע'}
+                <div className="text-center">
+                  <h1 className="text-3xl font-black sm:text-4xl">{lessonPart.name}</h1>
+                  <p className="mt-2 text-sm font-semibold text-white/80">{section.name}</p>
+                </div>
+                <div className="min-w-0 text-left">
+                  {navigation.next ? (
+                    <Link
+                      href={`/student/lesson/${navigation.next.id}`}
+                      className="block rounded-2xl bg-white/10 px-3 py-2 text-white transition hover:bg-white/20"
+                    >
+                      <div className="text-[11px] text-white/70">הבא</div>
+                      <div className="truncate text-sm font-semibold">
+                        {navigation.next.name}
+                      </div>
+                    </Link>
+                  ) : (
+                    <div className="rounded-2xl bg-white/5 px-3 py-2 text-white/50">
+                      <div className="text-[11px]">הבא</div>
+                      <div className="truncate text-sm font-semibold">-</div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -192,11 +189,7 @@ export default async function LessonPage({
         <section className="mt-6 student-footer-banner">
           <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
             <div>
-              <p className="text-sm font-semibold text-white/75">ממשיכים ברצף</p>
-              <h3 className="mt-2 text-2xl font-black">שומעים, מסיימים, ומתקדמים</h3>
-              <p className="mt-3 max-w-2xl text-sm leading-7 text-white/85">
-                כל קטע כאן בנוי כדי לעזור לשמור על זרימה, ריכוז ותחושת הצלחה לאורך כל הקריאה.
-              </p>
+              <h3 className="text-2xl font-black">המשך רציף לקטע הבא</h3>
             </div>
           </div>
         </section>

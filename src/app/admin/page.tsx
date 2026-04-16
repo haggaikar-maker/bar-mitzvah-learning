@@ -17,6 +17,7 @@ import {
   logoutAdmin,
   updateMyShareCode,
   resetStudentPartProgress,
+  updateStudentPartVisibility,
   upsertAdmin,
   upsertLessonPart,
   upsertLessonSlide,
@@ -260,7 +261,37 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         </td>
                         <td className="px-3 py-3">{getLessonMediaKindLabel(row.mediaKind)}</td>
                         <td className="px-3 py-3">
-                          {row.isVisibleToStudent ? 'מוצג לתלמיד' : 'מוסתר כרגע'}
+                          <form action={updateStudentPartVisibility} className="grid gap-2">
+                            <input
+                              type="hidden"
+                              name="student_id"
+                              value={trackingSummary.student.id}
+                            />
+                            <input
+                              type="hidden"
+                              name="lesson_part_id"
+                              value={row.lessonPartId}
+                            />
+                            <label className="flex items-center gap-2 text-xs text-slate-700">
+                              <input
+                                name="is_visible_to_student"
+                                type="checkbox"
+                                defaultChecked={row.isVisibleToStudent}
+                              />
+                              להציג לתלמיד
+                            </label>
+                            <button
+                              type="submit"
+                              className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-800"
+                            >
+                              שמירת חשיפה
+                            </button>
+                          </form>
+                          {!row.baseVisibility ? (
+                            <div className="mt-2 text-xs text-rose-600">
+                              מוסתר גם ברמת הקטע הכללית
+                            </div>
+                          ) : null}
                         </td>
                         <td className="px-3 py-3">{row.completedCount}/{row.completionTarget}</td>
                         <td className="px-3 py-3">

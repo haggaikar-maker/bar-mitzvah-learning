@@ -236,12 +236,12 @@ body {
 @media (max-width: 640px) {
   .student-shell {
     width: min(100vw - 16px, 1180px);
-    padding-block: 12px 20px;
+    padding-block: 10px 16px;
   }
 
   .student-hero {
     border-radius: 24px;
-    padding: 20px;
+    padding: 16px;
   }
 
   .student-card,
@@ -250,5 +250,22 @@ body {
   .student-footer-banner,
   .student-audio-panel {
     border-radius: 22px;
+  }
+
+  .student-badge {
+    padding: 6px 10px;
+    font-size: 0.7rem;
+  }
+
+  .student-progress-track {
+    height: 10px;
+  }
+
+  .student-image-slot {
+    min-height: auto;
+  }
+
+  .student-panel-title {
+    font-size: 1.15rem;
   }
 }

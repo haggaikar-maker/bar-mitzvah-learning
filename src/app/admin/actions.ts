@@ -430,6 +430,54 @@ export async function resetStudentPartProgress(formData: FormData) {
   revalidatePath('/student')
 }
 
+export async function updateStudentPartVisibility(formData: FormData) {
+  const session = await requireAdminSession()
+
+  const studentId = readNumber(formData, 'student_id')
+  const lessonPartId = readNumber(formData, 'lesson_part_id')
+  const isVisibleToStudent = readString(formData, 'is_visible_to_student') === 'on'
+
+  if (!studentId || !lessonPartId) {
+    throw new Error('חסרים מזהי תלמיד או תת־חלק לעדכון חשיפה.')
+  }
+
+  const { data: student, error: studentError } = await supabase
+    .from('students')
+    .select('id, admin_id')
+    .eq('id', studentId)
+    .maybeSingle()
+
+  if (studentError || !student) {
+    throw new Error(studentError?.message ?? 'התלמיד לא נמצא.')
+  }
+
+  if (session.role !== 'primary' && student.admin_id !== session.id) {
+    throw new Error('אין הרשאה לעדכן חשיפה עבור תלמיד זה.')
+  }
+
+  const { error } = await supabase
+    .from('student_lesson_part_settings')
+    .upsert(
+      {
+        student_id: studentId,
+        lesson_part_id: lessonPartId,
+        is_visible_to_student: isVisibleToStudent,
+      },
+      { onConflict: 'student_id,lesson_part_id' }
+    )
+
+  if (error) {
+    if (error.message.includes('student_lesson_part_settings')) {
+      throw new Error('טבלת חשיפת תתי־חלקים לתלמידים עדיין לא קיימת. צריך להריץ את עדכון ה-SQL החדש.')
+    }
+
+    throw new Error(error.message)
+  }
+
+  revalidatePath('/admin')
+  revalidatePath('/student')
+}
+
 export async function deleteStudentRecordingFromAdmin(formData: FormData) {
   const session = await requireAdminSession()
 

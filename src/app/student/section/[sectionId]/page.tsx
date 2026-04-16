@@ -23,7 +23,7 @@ export default async function SectionPartsPage({
     )
   }
 
-  const { student, section, parts, parashaName, error } =
+  const { student, section, parts, error } =
     await getSectionPageData(sectionIdNumber, session.id)
 
   if (error && !student) {
@@ -56,7 +56,7 @@ export default async function SectionPartsPage({
             href="/student"
             className="student-floating-chip inline-block px-4 py-2 text-sm font-semibold text-slate-700"
           >
-            חזרה לחלקים
+            חזרה לקריאות
           </Link>
           <form action={logoutUser}>
             <button
@@ -69,71 +69,39 @@ export default async function SectionPartsPage({
         </div>
 
         <section className="student-hero">
-          <div className="relative z-10 grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="relative z-10">
             <div className="text-white">
-              <span className="student-badge bg-white/16 text-white ring-1 ring-white/20">
-                מסלול תרגול פעיל
-              </span>
-              <h1 className="mt-4 text-4xl font-black sm:text-5xl">
+              <h1 className="mt-2 text-4xl font-black sm:text-5xl">
                 {section.name}
               </h1>
-              <p className="mt-4 text-base leading-8 text-white/90">
-                כאן נמצאים תתי־החלקים שמוכנים לתלמיד כרגע. כל כרטיס מוביל ישירות
-                למסך האזנה עם ניווט קדימה ואחורה.
+              <p className="mt-4 text-sm font-semibold text-white/85">
+                {parts.length} תתי־חלקים
               </p>
-            </div>
-
-            <div className="student-glass-card p-5 text-[var(--student-ink)]">
-              <p className="text-sm font-semibold text-slate-500">פרשה</p>
-              <h2 className="mt-2 text-3xl font-black">
-                {parashaName ?? 'לא הוגדרה פרשה'}
-              </h2>
-              <div className="mt-5 grid grid-cols-2 gap-3">
-                <div className="rounded-2xl bg-white/85 p-4 text-center">
-                  <p className="text-xs text-slate-500">תתי־חלקים</p>
-                  <p className="mt-2 text-3xl font-black text-slate-900">{parts.length}</p>
-                </div>
-                <div className="rounded-2xl bg-white/85 p-4 text-center">
-                  <p className="text-xs text-slate-500">זמינות</p>
-                  <p className="mt-2 text-sm font-bold text-slate-700">מוכנים לתרגול</p>
-                </div>
-              </div>
             </div>
           </div>
         </section>
 
-        <div className="mt-6 student-card p-6 shadow-sm ring-1 ring-white/50 sm:p-8">
-          <div className="student-image-slot rounded-[28px] p-5 text-white">
-            <h3 className="text-2xl font-black">בחר תת־חלק שמוכן להאזנה</h3>
-          </div>
-
-          <div className="mt-8">
+        <div className="mt-6 student-card p-4 shadow-sm ring-1 ring-white/50 sm:p-6">
+          <div className="mt-2">
             {parts.length > 0 ? (
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
                 {parts.map((part) => (
                   <Link
                     key={part.id}
                     href={`/student/lesson/${part.id}`}
-                    className="student-section-card p-5 ring-1 ring-white/70"
+                    className="student-section-card p-2.5 ring-1 ring-white/70"
                   >
                     <div className="relative z-10">
-                      <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start justify-between gap-2">
                         <div>
-                          <h4 className="text-xl font-black text-slate-900">
+                          <h4 className="text-base font-black leading-tight text-slate-900 sm:text-lg">
                             {part.name}
                           </h4>
-                          <p className="mt-1 text-sm text-slate-500">
-                            {part.is_full_reading ? 'קריאה מלאה' : `סדר ${part.part_order}`}
-                          </p>
                         </div>
-
-                        <span className="student-badge bg-white text-[var(--student-ink)] ring-1 ring-slate-200">
-                          {part.practiceCount} תרגולים
-                        </span>
                       </div>
 
-                      <div className="mt-5 grid gap-3">
-                        <div className="flex items-center justify-between rounded-2xl bg-white/80 px-4 py-3 text-sm text-slate-700 ring-1 ring-white/80">
+                      <div className="mt-3 grid gap-1.5">
+                        <div className="flex items-center justify-between rounded-2xl bg-white/80 px-3 py-2 text-xs text-slate-700 ring-1 ring-white/80 sm:text-sm">
                           <span>{part.completedCount}/{part.completionTarget} ליעד</span>
                           <span>
                             <AudioDuration
@@ -146,25 +114,10 @@ export default async function SectionPartsPage({
                             />
                           </span>
                         </div>
-                        <div className="flex items-center justify-between rounded-2xl bg-white/80 px-4 py-3 text-sm text-slate-700 ring-1 ring-white/80">
-                          <span>
-                            {part.mediaKind === 'video'
-                              ? 'וידאו מלא'
-                              : `${part.slideCount} שקופיות מסונכרנות`}
-                          </span>
-                          <span>{part.isReady ? 'מוכן' : 'לא מוכן'}</span>
+                        <div className="flex items-center justify-between rounded-2xl bg-white/80 px-3 py-2 text-xs text-slate-700 ring-1 ring-white/80 sm:text-sm">
+                          <span>{part.practiceCount} תרגולים</span>
+                          <span>{part.mediaKind === 'video' ? 'וידאו' : 'תמונות'}</span>
                         </div>
-                      </div>
-
-                      <p className="mt-4 text-xs text-slate-500">
-                        {part.lastPracticedAt
-                          ? `תרגול אחרון: ${new Date(part.lastPracticedAt).toLocaleString('he-IL')}`
-                          : 'עדיין לא תורגל'}
-                      </p>
-
-                      <div className="mt-4 flex items-center justify-between text-sm font-semibold text-slate-700">
-                        <span>פתיחת הקטע</span>
-                        <span>←</span>
                       </div>
                     </div>
                   </Link>
@@ -184,17 +137,6 @@ export default async function SectionPartsPage({
           ) : null}
         </div>
 
-        <section className="mt-6 student-footer-banner">
-          <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
-            <div>
-              <p className="text-sm font-semibold text-white/75">טיפ ללמידה טובה</p>
-              <h3 className="mt-2 text-2xl font-black">לעבוד קצר, רצוף, ולהמשיך לקטע הבא</h3>
-              <p className="mt-3 max-w-2xl text-sm leading-7 text-white/85">
-                ככל שהניווט מהיר ונעים יותר, יותר קל לשמור על רצף הקשבה ותחושת הצלחה.
-              </p>
-            </div>
-          </div>
-        </section>
       </div>
     </main>
   )

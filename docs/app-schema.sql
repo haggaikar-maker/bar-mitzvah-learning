@@ -79,6 +79,16 @@ create table if not exists student_recordings (
   unique (student_id, lesson_part_id)
 );
 
+create table if not exists student_lesson_part_settings (
+  id bigint generated always as identity primary key,
+  student_id bigint not null references students(id) on delete cascade,
+  lesson_part_id bigint not null references lesson_parts(id) on delete cascade,
+  is_visible_to_student boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (student_id, lesson_part_id)
+);
+
 create table if not exists content_share_requests (
   id bigint generated always as identity primary key,
   requester_admin_id bigint not null references admins(id) on delete cascade,
@@ -136,6 +146,28 @@ begin
   end if;
 end $$;
 
+create table if not exists student_lesson_part_settings (
+  id bigint generated always as identity primary key,
+  student_id bigint not null references students(id) on delete cascade,
+  lesson_part_id bigint not null references lesson_parts(id) on delete cascade,
+  is_visible_to_student boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'student_lesson_part_settings_student_id_lesson_part_id_key'
+  ) then
+    alter table student_lesson_part_settings
+      add constraint student_lesson_part_settings_student_id_lesson_part_id_key
+      unique (student_id, lesson_part_id);
+  end if;
+end $$;
+
 do $$
 begin
   if not exists (
@@ -157,6 +189,7 @@ create index if not exists idx_lesson_parts_group on lesson_parts(lesson_group_i
 create index if not exists idx_lesson_slides_part on lesson_slides(lesson_part_id, slide_index);
 create index if not exists idx_practice_events_student_part on practice_events(student_id, lesson_part_id);
 create index if not exists idx_student_recordings_student_part on student_recordings(student_id, lesson_part_id);
+create index if not exists idx_student_lesson_part_settings_student_part on student_lesson_part_settings(student_id, lesson_part_id);
 create index if not exists idx_share_requests_source on content_share_requests(source_admin_id, status);
 create index if not exists idx_share_requests_requester on content_share_requests(requester_admin_id, status);
 

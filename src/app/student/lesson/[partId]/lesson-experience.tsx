@@ -739,15 +739,6 @@ export default function LessonExperience({
         <div className="fixed inset-0 z-[60] bg-slate-950/75 p-3 sm:p-6">
           <div className="mx-auto flex max-h-[calc(100vh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-[2rem] bg-white shadow-2xl sm:max-h-[calc(100vh-3rem)]">
             <div className="relative bg-slate-100">
-              <button
-                type="button"
-                onClick={closeRecordingModal}
-                disabled={isRecording || isRecordingBusy}
-                className="absolute left-3 top-3 z-10 rounded-2xl bg-white/90 px-3 py-2 text-sm font-semibold text-slate-700 shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                סגירה
-              </button>
-
               {mediaKind === 'video' && mediaUrl ? (
                 <button
                   type="button"
@@ -881,6 +872,17 @@ export default function LessonExperience({
                   </button>
                 </div>
 
+                <div className="mt-3 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={closeRecordingModal}
+                    disabled={isRecording || isRecordingBusy}
+                    className="rounded-2xl bg-slate-100 px-5 py-3 text-sm font-semibold text-slate-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    סגירה
+                  </button>
+                </div>
+
                 {recordingStatus ? (
                   <div className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-200">
                     {recordingStatus}
@@ -941,16 +943,6 @@ export default function LessonExperience({
       {isRecordingVisualOpen ? (
         <div className="fixed inset-0 z-[70] bg-slate-950/92 p-3 sm:p-5">
           <div className="mx-auto flex h-full w-full max-w-5xl flex-col">
-            <div className="mb-3 flex justify-start">
-              <button
-                type="button"
-                onClick={() => setIsRecordingVisualOpen(false)}
-                className="rounded-2xl bg-white/90 px-4 py-2 text-sm font-semibold text-slate-700 shadow-lg"
-              >
-                סגירה
-              </button>
-            </div>
-
             <div className="relative flex-1 overflow-hidden rounded-[2rem] bg-black">
               {mediaKind === 'video' && mediaUrl ? (
                 <video
@@ -967,6 +959,16 @@ export default function LessonExperience({
                   className="absolute inset-0 h-full w-full object-contain"
                 />
               ) : null}
+            </div>
+
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setIsRecordingVisualOpen(false)}
+                className="rounded-2xl bg-white/90 px-5 py-3 text-sm font-semibold text-slate-700 shadow-lg"
+              >
+                סגירה
+              </button>
             </div>
           </div>
         </div>

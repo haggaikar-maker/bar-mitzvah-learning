@@ -50,6 +50,7 @@ export default function LessonExperience({
   const completionLoggedRef = useRef(false)
   const playbackStartedAtBeginningRef = useRef(false)
   const continuousPlaybackRef = useRef(false)
+  const closeAfterStopRef = useRef<'save' | 'discard' | null>(null)
 
   const [currentTime, setCurrentTime] = useState(0)
   const [isViewerOpen, setIsViewerOpen] = useState(false)
@@ -331,6 +332,19 @@ export default function LessonExperience({
     }
   }
 
+  async function savePreparedRecording(
+    file: File,
+    explicitDurationSeconds?: number | null,
+    shouldCloseModal?: boolean
+  ) {
+    await uploadRecording(file, explicitDurationSeconds)
+    clearDraftRecording()
+
+    if (shouldCloseModal) {
+      setIsRecordingModalOpen(false)
+    }
+  }
+
   async function startRecording() {
     if (!navigator.mediaDevices?.getUserMedia) {
       setRecordingStatus('הדפדפן הזה לא תומך בהקלטה ישירה.')
@@ -390,6 +404,25 @@ export default function LessonExperience({
         setDraftRecordingDuration(finalDuration)
         setDraftRecordingUrl(previewUrl)
         setRecordingStatus('ההקלטה מוכנה. אפשר להאזין, להקליט מחדש או לשמור.')
+
+        const closeIntent = closeAfterStopRef.current
+        closeAfterStopRef.current = null
+
+        if (closeIntent === 'save') {
+          startTransition(() => {
+            void savePreparedRecording(file, finalDuration, true)
+          })
+          return
+        }
+
+        if (closeIntent === 'discard') {
+          URL.revokeObjectURL(previewUrl)
+          setDraftRecordingFile(null)
+          setDraftRecordingDuration(null)
+          setDraftRecordingUrl(null)
+          setRecordingStatus(null)
+          setIsRecordingModalOpen(false)
+        }
       })
 
       recorder.start()
@@ -443,13 +476,18 @@ export default function LessonExperience({
       return
     }
 
-    await uploadRecording(draftRecordingFile, draftRecordingDuration)
-    clearDraftRecording()
-    setIsRecordingModalOpen(false)
+    await savePreparedRecording(draftRecordingFile, draftRecordingDuration, true)
   }
 
   function closeRecordingModal() {
-    if (isRecording || isRecordingBusy) {
+    if (isRecordingBusy) {
+      return
+    }
+
+    if (isRecording) {
+      const shouldSave = window.confirm('ההקלטה תיעצר עכשיו. לשמור אותה לפני סגירה?')
+      closeAfterStopRef.current = shouldSave ? 'save' : 'discard'
+      stopRecording()
       return
     }
 
@@ -751,6 +789,7 @@ export default function LessonExperience({
                     playsInline
                     preload="metadata"
                     muted
+                    disablePictureInPicture
                     style={{
                       position: 'absolute',
                       inset: 0,
@@ -876,7 +915,7 @@ export default function LessonExperience({
                   <button
                     type="button"
                     onClick={closeRecordingModal}
-                    disabled={isRecording || isRecordingBusy}
+                    disabled={isRecordingBusy && !isRecording}
                     className="rounded-2xl bg-slate-100 px-5 py-3 text-sm font-semibold text-slate-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     סגירה
@@ -947,9 +986,10 @@ export default function LessonExperience({
               {mediaKind === 'video' && mediaUrl ? (
                 <video
                   src={mediaUrl}
-                  controls
                   playsInline
                   preload="metadata"
+                  muted
+                  disablePictureInPicture
                   className="absolute inset-0 h-full w-full object-contain"
                 />
               ) : firstSlide ? (

@@ -65,6 +65,13 @@ export default function LessonExperience({
   const [isRecordingBusy, setIsRecordingBusy] = useState(false)
   const [recordingStatus, setRecordingStatus] = useState<string | null>(null)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
+  const [isRecordingModalOpen, setIsRecordingModalOpen] = useState(false)
+  const [isRecordingVisualOpen, setIsRecordingVisualOpen] = useState(false)
+  const [draftRecordingFile, setDraftRecordingFile] = useState<File | null>(null)
+  const [draftRecordingDuration, setDraftRecordingDuration] = useState<number | null>(
+    null
+  )
+  const [draftRecordingUrl, setDraftRecordingUrl] = useState<string | null>(null)
   const [recordingPreviewUrl, setRecordingPreviewUrl] = useState<string | null>(
     studentRecording?.signed_url ?? null
   )
@@ -72,6 +79,7 @@ export default function LessonExperience({
   const activeSlideIndex =
     initialSlides.findLastIndex((slide) => slide.start_second <= currentTime) || 0
   const activeSlide = initialSlides[Math.max(activeSlideIndex, 0)] ?? null
+  const firstSlide = initialSlides[0] ?? null
   const completedCount = practiceEvents.filter((event) => event.completed).length
   const sourceDuration =
     mediaDuration && Number.isFinite(mediaDuration) && mediaDuration > 0
@@ -102,6 +110,23 @@ export default function LessonExperience({
       recordingStreamRef.current.getTracks().forEach((track) => track.stop())
       recordingStreamRef.current = null
     }
+  }
+
+  function pauseLessonMedia() {
+    const media = getMediaElement()
+    media?.pause()
+  }
+
+  function clearDraftRecording() {
+    if (draftRecordingUrl) {
+      URL.revokeObjectURL(draftRecordingUrl)
+    }
+
+    setDraftRecordingFile(null)
+    setDraftRecordingDuration(null)
+    setDraftRecordingUrl(null)
+    setRecordingSeconds(0)
+    recordingSecondsRef.current = 0
   }
 
   useEffect(() => {
@@ -137,8 +162,11 @@ export default function LessonExperience({
       if (recordingPreviewUrl && recordingPreviewUrl.startsWith('blob:')) {
         URL.revokeObjectURL(recordingPreviewUrl)
       }
+      if (draftRecordingUrl) {
+        URL.revokeObjectURL(draftRecordingUrl)
+      }
     }
-  }, [recordingPreviewUrl])
+  }, [draftRecordingUrl, recordingPreviewUrl])
 
   function formatDuration(totalSeconds: number) {
     const minutes = Math.floor(totalSeconds / 60)
@@ -315,6 +343,7 @@ export default function LessonExperience({
     }
 
     setIsRecordingBusy(true)
+    pauseLessonMedia()
     setRecordingStatus('מתחיל הקלטה...')
 
     try {
@@ -351,10 +380,16 @@ export default function LessonExperience({
         const file = new File([blob], `student-recording.${extension}`, {
           type: recorder.mimeType || 'audio/webm',
         })
+        const previewUrl = URL.createObjectURL(file)
 
-        startTransition(() => {
-          void uploadRecording(file, finalDuration)
-        })
+        if (draftRecordingUrl) {
+          URL.revokeObjectURL(draftRecordingUrl)
+        }
+
+        setDraftRecordingFile(file)
+        setDraftRecordingDuration(finalDuration)
+        setDraftRecordingUrl(previewUrl)
+        setRecordingStatus('ההקלטה מוכנה. אפשר להאזין, להקליט מחדש או לשמור.')
       })
 
       recorder.start()
@@ -389,6 +424,37 @@ export default function LessonExperience({
 
   function stopRecording() {
     mediaRecorderRef.current?.stop()
+  }
+
+  async function openRecordingModalAndStart() {
+    setIsRecordingModalOpen(true)
+    clearDraftRecording()
+    await startRecording()
+  }
+
+  async function restartRecording() {
+    clearDraftRecording()
+    await startRecording()
+  }
+
+  async function saveDraftRecording() {
+    if (!draftRecordingFile) {
+      setRecordingStatus('אין עדיין הקלטה מוכנה לשמירה.')
+      return
+    }
+
+    await uploadRecording(draftRecordingFile, draftRecordingDuration)
+    clearDraftRecording()
+    setIsRecordingModalOpen(false)
+  }
+
+  function closeRecordingModal() {
+    if (isRecording || isRecordingBusy) {
+      return
+    }
+
+    clearDraftRecording()
+    setIsRecordingModalOpen(false)
   }
 
   async function handleFileUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -528,13 +594,13 @@ export default function LessonExperience({
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <button
               type="button"
-              onClick={isRecording ? stopRecording : startRecording}
+              onClick={() => {
+                void openRecordingModalAndStart()
+              }}
               disabled={isRecordingBusy || !maxRecordingSeconds}
-              className={`rounded-2xl px-4 py-3 text-sm font-semibold text-white ${
-                isRecording ? 'bg-rose-600' : 'bg-[var(--student-orange)]'
-              } disabled:cursor-not-allowed disabled:opacity-60`}
+              className="rounded-2xl bg-[var(--student-orange)] px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isRecording ? `עצירת הקלטה (${formatDuration(recordingSeconds)})` : 'התחלת הקלטה'}
+              התחלת הקלטה
             </button>
 
             <button
@@ -669,6 +735,163 @@ export default function LessonExperience({
         ) : null}
       </div>
 
+      {isRecordingModalOpen ? (
+        <div className="fixed inset-0 z-[60] bg-slate-950/75 p-3 sm:p-6">
+          <div className="mx-auto flex max-h-[calc(100vh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-[2rem] bg-white shadow-2xl sm:max-h-[calc(100vh-3rem)]">
+            <div className="relative bg-slate-100">
+              <button
+                type="button"
+                onClick={closeRecordingModal}
+                disabled={isRecording || isRecordingBusy}
+                className="absolute left-3 top-3 z-10 rounded-2xl bg-white/90 px-3 py-2 text-sm font-semibold text-slate-700 shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                סגירה
+              </button>
+
+              {mediaKind === 'video' && mediaUrl ? (
+                <button
+                  type="button"
+                  onClick={() => setIsRecordingVisualOpen(true)}
+                  className="relative block w-full overflow-hidden bg-black text-right"
+                  style={{ height: '280px' }}
+                >
+                  <video
+                    src={mediaUrl}
+                    playsInline
+                    preload="metadata"
+                    muted
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      display: 'block',
+                      width: '100%',
+                      height: '100%',
+                      maxWidth: '100%',
+                      maxHeight: '100%',
+                      objectFit: 'contain',
+                      objectPosition: 'center',
+                    }}
+                  />
+                </button>
+              ) : firstSlide ? (
+                <button
+                  type="button"
+                  onClick={() => setIsRecordingVisualOpen(true)}
+                  className="relative block w-full overflow-hidden bg-white text-right"
+                  style={{ height: '280px' }}
+                >
+                  <img
+                    src={firstSlide.image_url}
+                    alt="התמונה הראשונה של הקטע"
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      display: 'block',
+                      width: '100%',
+                      height: '100%',
+                      maxWidth: '100%',
+                      maxHeight: '100%',
+                      objectFit: 'contain',
+                      objectPosition: 'center',
+                    }}
+                  />
+                </button>
+              ) : (
+                <div
+                  className="flex w-full items-center justify-center bg-white text-center text-sm text-slate-500"
+                  style={{ height: '280px' }}
+                >
+                  אין תמונה זמינה לפתיחת ההקלטה
+                </div>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5">
+              <div className="rounded-[24px] bg-slate-50 p-4 ring-1 ring-slate-200">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500">הקלטה פעילה</p>
+                    <h4 className="mt-1 text-lg font-black text-slate-900">
+                      {isRecording
+                        ? `מקליט ${formatDuration(recordingSeconds)}`
+                        : draftRecordingFile
+                          ? 'הקלטה מוכנה לשמירה'
+                          : 'חלון הקלטה'}
+                    </h4>
+                  </div>
+                  {maxRecordingSeconds ? (
+                    <span className="student-badge bg-white text-slate-700 ring-1 ring-slate-200">
+                      {formatDuration(recordingSeconds)} / {formatDuration(maxRecordingSeconds)}
+                    </span>
+                  ) : null}
+                </div>
+
+                {maxRecordingSeconds ? (
+                  <div className="mt-4">
+                    <div className="h-3 overflow-hidden rounded-full bg-slate-200">
+                      <div
+                        className="h-full rounded-full bg-[var(--student-orange)] transition-all duration-300"
+                        style={{
+                          width: `${Math.min(
+                            100,
+                            Math.round((recordingSeconds / maxRecordingSeconds) * 100)
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                {draftRecordingUrl ? (
+                  <div className="mt-4 rounded-[24px] bg-white p-4 ring-1 ring-slate-200">
+                    <audio controls className="w-full" src={draftRecordingUrl}>
+                      הדפדפן שלך לא תומך בהשמעת ההקלטה.
+                    </audio>
+                  </div>
+                ) : null}
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  <button
+                    type="button"
+                    onClick={stopRecording}
+                    disabled={!isRecording}
+                    className="rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    הפסק הקלטה
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void restartRecording()
+                    }}
+                    disabled={isRecordingBusy || isRecording || !maxRecordingSeconds}
+                    className="rounded-2xl bg-[var(--student-ink)] px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    הקלטה מחדש
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void saveDraftRecording()
+                    }}
+                    disabled={!draftRecordingFile || isRecording || isRecordingBusy}
+                    className="rounded-2xl bg-[var(--student-orange)] px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    שמירה
+                  </button>
+                </div>
+
+                {recordingStatus ? (
+                  <div className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-200">
+                    {recordingStatus}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {isViewerOpen && activeSlide && mediaKind === 'audio_slides' ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
           <div className="w-full max-w-5xl rounded-[2rem] bg-white p-4 shadow-2xl sm:p-6">
@@ -710,6 +933,40 @@ export default function LessonExperience({
                   שקופית {slide.slide_index}
                 </button>
               ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isRecordingVisualOpen ? (
+        <div className="fixed inset-0 z-[70] bg-slate-950/92 p-3 sm:p-5">
+          <div className="mx-auto flex h-full w-full max-w-5xl flex-col">
+            <div className="mb-3 flex justify-start">
+              <button
+                type="button"
+                onClick={() => setIsRecordingVisualOpen(false)}
+                className="rounded-2xl bg-white/90 px-4 py-2 text-sm font-semibold text-slate-700 shadow-lg"
+              >
+                סגירה
+              </button>
+            </div>
+
+            <div className="relative flex-1 overflow-hidden rounded-[2rem] bg-black">
+              {mediaKind === 'video' && mediaUrl ? (
+                <video
+                  src={mediaUrl}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  className="absolute inset-0 h-full w-full object-contain"
+                />
+              ) : firstSlide ? (
+                <img
+                  src={firstSlide.image_url}
+                  alt="תצוגה מלאה"
+                  className="absolute inset-0 h-full w-full object-contain"
+                />
+              ) : null}
             </div>
           </div>
         </div>

@@ -72,7 +72,7 @@ export default async function SectionPartsPage({
           <div className="relative z-10">
             <div className="text-white">
               <h1 className="mt-2 text-4xl font-black sm:text-5xl">
-                {section.name}
+                {section?.name ?? 'חלק'}
               </h1>
               <p className="mt-4 text-sm font-semibold text-white/85">
                 {parts.length} תתי־חלקים

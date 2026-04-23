@@ -31,6 +31,24 @@ function readNumber(formData: FormData, key: string) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function isLessonPartImportableForCopy(
+  part: {
+    id: number
+    media_kind?: string | null
+    audio_url: string | null
+    video_url?: string | null
+  },
+  slideCountByPartId: Map<number, number>
+) {
+  const mediaKind = getLessonMediaKind(part)
+
+  if (mediaKind === 'video') {
+    return Boolean(part.video_url)
+  }
+
+  return Boolean(part.audio_url) && (slideCountByPartId.get(part.id) ?? 0) > 0
+}
+
 async function resolveValidAdminId(adminId: number | null) {
   if (!adminId) {
     return null
@@ -47,6 +65,102 @@ async function resolveValidAdminId(adminId: number | null) {
   }
 
   return data?.id ?? null
+}
+
+async function getManageableTeacherParasha(
+  teacherParashaId: number,
+  session: Awaited<ReturnType<typeof requireAdminSession>>
+) {
+  const { data, error } = await supabase
+    .from('teacher_parashot')
+    .select('id, owner_admin_id, parasha_id, nusach_id, status')
+    .eq('id', teacherParashaId)
+    .maybeSingle()
+
+  if (error || !data) {
+    throw new Error(error?.message ?? 'פרשת המלמד לא נמצאה.')
+  }
+
+  if (session.role !== 'primary' && data.owner_admin_id !== session.id) {
+    throw new Error('אין הרשאה לנהל את פרשת המלמד הזאת.')
+  }
+
+  return data
+}
+
+async function getManageableLessonGroup(
+  lessonGroupId: number,
+  session: Awaited<ReturnType<typeof requireAdminSession>>
+) {
+  const { data, error } = await supabase
+    .from('lesson_groups')
+    .select('id, teacher_parasha_id')
+    .eq('id', lessonGroupId)
+    .maybeSingle()
+
+  if (error || !data) {
+    throw new Error(error?.message ?? 'קבוצת השיעור לא נמצאה.')
+  }
+
+  if (data.teacher_parasha_id) {
+    await getManageableTeacherParasha(data.teacher_parasha_id, session)
+  }
+
+  return data
+}
+
+async function getManageableLessonPart(
+  lessonPartId: number,
+  session: Awaited<ReturnType<typeof requireAdminSession>>
+) {
+  const { data, error } = await supabase
+    .from('lesson_parts')
+    .select('id, lesson_group_id')
+    .eq('id', lessonPartId)
+    .maybeSingle()
+
+  if (error || !data) {
+    throw new Error(error?.message ?? 'תת־החלק לא נמצא.')
+  }
+
+  await getManageableLessonGroup(data.lesson_group_id, session)
+  return data
+}
+
+async function assignStudentTeacherParashaInternal(input: {
+  studentId: number
+  teacherParashaId: number | null
+  assignedByAdminId: number | null
+}) {
+  const { error: endAssignmentsError } = await supabase
+    .from('student_teacher_parasha_assignments')
+    .update({
+      status: 'ended',
+      ended_at: new Date().toISOString(),
+    })
+    .eq('student_id', input.studentId)
+    .eq('status', 'active')
+
+  if (endAssignmentsError) {
+    throw new Error(endAssignmentsError.message)
+  }
+
+  if (!input.teacherParashaId) {
+    return
+  }
+
+  const { error } = await supabase
+    .from('student_teacher_parasha_assignments')
+    .insert({
+      student_id: input.studentId,
+      teacher_parasha_id: input.teacherParashaId,
+      assigned_by_admin_id: input.assignedByAdminId,
+      status: 'active',
+    })
+
+  if (error) {
+    throw new Error(error.message)
+  }
 }
 
 async function saveUploadedFile(
@@ -104,13 +218,31 @@ export async function logoutAdmin() {
 }
 
 export async function upsertParasha(formData: FormData) {
-  await requireAdminSession()
+  const session = await requireAdminSession()
+
+  if (session.role !== 'primary') {
+    throw new Error('רק מנהל ראשי יכול לערוך את רשימת הפרשות הכללית.')
+  }
 
   const id = readNumber(formData, 'id')
   const name = readString(formData, 'name')
 
   if (!name) {
     throw new Error('יש להזין שם פרשה.')
+  }
+
+  const { data: existingParasha, error: existingParashaError } = await supabase
+    .from('parashot')
+    .select('id')
+    .eq('name', name)
+    .maybeSingle()
+
+  if (existingParashaError) {
+    throw new Error(existingParashaError.message)
+  }
+
+  if (existingParasha && existingParasha.id !== id) {
+    throw new Error('הפרשה הזאת כבר קיימת במערכת.')
   }
 
   if (id) {
@@ -125,7 +257,11 @@ export async function upsertParasha(formData: FormData) {
 }
 
 export async function upsertSection(formData: FormData) {
-  await requireAdminSession()
+  const session = await requireAdminSession()
+
+  if (session.role !== 'primary') {
+    throw new Error('רק מנהל ראשי יכול לערוך את רשימת החלקים הכללית.')
+  }
 
   const id = readNumber(formData, 'id')
   const name = readString(formData, 'name')
@@ -133,6 +269,20 @@ export async function upsertSection(formData: FormData) {
 
   if (!name || orderIndex === null) {
     throw new Error('יש להזין שם חלק וסדר תצוגה.')
+  }
+
+  const { data: existingSection, error: existingSectionError } = await supabase
+    .from('sections')
+    .select('id')
+    .eq('name', name)
+    .maybeSingle()
+
+  if (existingSectionError) {
+    throw new Error(existingSectionError.message)
+  }
+
+  if (existingSection && existingSection.id !== id) {
+    throw new Error('החלק הראשי הזה כבר קיים במערכת.')
   }
 
   if (id) {
@@ -158,7 +308,7 @@ export async function upsertStudent(formData: FormData) {
   const name = readString(formData, 'name')
   const username = readString(formData, 'username')
   const password = readString(formData, 'password')
-  const parashaId = readNumber(formData, 'parasha_id')
+  const teacherParashaId = readNumber(formData, 'teacher_parasha_id')
   const managerId = readNumber(formData, 'manager_id')
 
   if (!name || !username) {
@@ -179,10 +329,18 @@ export async function upsertStudent(formData: FormData) {
     throw new Error('שם המשתמש הזה כבר קיים. בחר שם משתמש אחר לתלמיד.')
   }
 
-  const requestedAdminId =
+  let requestedAdminId =
     session.role === 'primary'
       ? (managerId ?? session.id)
       : session.id
+  let resolvedParashaId: number | null = null
+
+  if (teacherParashaId) {
+    const teacherParasha = await getManageableTeacherParasha(teacherParashaId, session)
+    requestedAdminId = teacherParasha.owner_admin_id
+    resolvedParashaId = teacherParasha.parasha_id
+  }
+
   const validAdminId = await resolveValidAdminId(requestedAdminId)
 
   if (requestedAdminId && !validAdminId) {
@@ -200,7 +358,7 @@ export async function upsertStudent(formData: FormData) {
   } = {
     name,
     username,
-    parasha_id: parashaId,
+    parasha_id: resolvedParashaId,
     admin_id: validAdminId,
   }
 
@@ -232,6 +390,11 @@ export async function upsertStudent(formData: FormData) {
       studentId,
       managerId: validAdminId,
     })
+    await assignStudentTeacherParashaInternal({
+      studentId,
+      teacherParashaId,
+      assignedByAdminId: session.id,
+    })
   }
 
   revalidatePath('/admin')
@@ -241,18 +404,19 @@ export async function upsertStudent(formData: FormData) {
 export async function ensureLessonGroup(formData: FormData) {
   const session = await requireAdminSession()
 
-  const parashaId = readNumber(formData, 'parasha_id')
+  const teacherParashaId = readNumber(formData, 'teacher_parasha_id')
   const sectionId = readNumber(formData, 'section_id')
 
-  if (!parashaId || !sectionId) {
-    throw new Error('יש לבחור פרשה וחלק.')
+  if (!teacherParashaId || !sectionId) {
+    throw new Error('יש לבחור פרשת מלמד וחלק.')
   }
+
+  const teacherParasha = await getManageableTeacherParasha(teacherParashaId, session)
 
   const { data: existing, error: lookupError } = await supabase
     .from('lesson_groups')
     .select('id')
-    .eq('admin_id', session.id ?? -1)
-    .eq('parasha_id', parashaId)
+    .eq('teacher_parasha_id', teacherParashaId)
     .eq('section_id', sectionId)
     .maybeSingle()
 
@@ -264,8 +428,9 @@ export async function ensureLessonGroup(formData: FormData) {
     const { error } = await supabase
       .from('lesson_groups')
       .insert({
-        admin_id: session.id,
-        parasha_id: parashaId,
+        admin_id: teacherParasha.owner_admin_id,
+        parasha_id: teacherParasha.parasha_id,
+        teacher_parasha_id: teacherParashaId,
         section_id: sectionId,
       })
     if (error) throw new Error(error.message)
@@ -275,7 +440,7 @@ export async function ensureLessonGroup(formData: FormData) {
 }
 
 export async function upsertLessonPart(formData: FormData) {
-  await requireAdminSession()
+  const session = await requireAdminSession()
 
   const id = readNumber(formData, 'id')
   const lessonGroupId = readNumber(formData, 'lesson_group_id')
@@ -307,6 +472,8 @@ export async function upsertLessonPart(formData: FormData) {
   if (!lessonGroupId || !name || partOrder === null) {
     throw new Error('יש להזין שם תת-חלק, סדר ומזהה קבוצה.')
   }
+
+  await getManageableLessonGroup(lessonGroupId, session)
 
   if (completionTarget !== null && completionTarget < 1) {
     throw new Error('יעד ההשלמות חייב להיות לפחות 1.')
@@ -532,7 +699,7 @@ export async function deleteStudentRecordingFromAdmin(formData: FormData) {
 }
 
 export async function upsertLessonSlide(formData: FormData) {
-  await requireAdminSession()
+  const session = await requireAdminSession()
 
   const id = readNumber(formData, 'id')
   const lessonPartId = readNumber(formData, 'lesson_part_id')
@@ -556,6 +723,10 @@ export async function upsertLessonSlide(formData: FormData) {
 
   if (lessonPartError) {
     throw new Error(lessonPartError.message)
+  }
+
+  if (lessonPartId) {
+    await getManageableLessonPart(lessonPartId, session)
   }
 
   if (getLessonMediaKind(lessonPart) === 'video') {
@@ -632,6 +803,8 @@ export async function upsertAdmin(formData: FormData) {
   const id = readNumber(formData, 'id')
   const username = readString(formData, 'username')
   const displayName = readString(formData, 'display_name')
+  const city = readString(formData, 'city')
+  const email = readString(formData, 'email')
   const password = readString(formData, 'password')
   const role = readString(formData, 'role') === 'primary' ? 'primary' : 'teacher'
 
@@ -642,11 +815,15 @@ export async function upsertAdmin(formData: FormData) {
   const payload: {
     username: string
     display_name: string
+    city: string | null
+    email: string | null
     role: 'primary' | 'teacher'
     password_hash?: string
   } = {
     username,
     display_name: displayName,
+    city: city || null,
+    email: email || null,
     role,
   }
 
@@ -656,14 +833,26 @@ export async function upsertAdmin(formData: FormData) {
 
   if (id) {
     const { error } = await supabase.from('admins').update(payload).eq('id', id)
-    if (error) throw new Error(error.message)
+    if (error) {
+      if (error.message.includes('city') || error.message.includes('email')) {
+        throw new Error('שדות העיר והאימייל עדיין לא קיימים בבסיס הנתונים. צריך להריץ את עדכון ה-SQL החדש.')
+      }
+
+      throw new Error(error.message)
+    }
   } else {
     if (!payload.password_hash) {
       throw new Error('ביצירת מנהל חדש חייבים להזין סיסמה.')
     }
 
     const { error } = await supabase.from('admins').insert(payload)
-    if (error) throw new Error(error.message)
+    if (error) {
+      if (error.message.includes('city') || error.message.includes('email')) {
+        throw new Error('שדות העיר והאימייל עדיין לא קיימים בבסיס הנתונים. צריך להריץ את עדכון ה-SQL החדש.')
+      }
+
+      throw new Error(error.message)
+    }
   }
 
   revalidatePath('/admin')
@@ -699,19 +888,74 @@ export async function copyParashaStructure(formData: FormData) {
     throw new Error('נדרש מנהל מתוך בסיס הנתונים כדי להעתיק מבנה.')
   }
 
-  const parashaId = readNumber(formData, 'parasha_id')
-  const sourceUsername = readString(formData, 'source_username')
+  const teacherParashaId = readNumber(formData, 'teacher_parasha_id')
+  let sourceTeacherParashaId = readNumber(formData, 'source_teacher_parasha_id')
+  const copyScope = readString(formData, 'copy_scope') === 'single_part' ? 'single_part' : 'all'
+  const sourceLessonPartId = readNumber(formData, 'source_lesson_part_id')
   const shareCode = readString(formData, 'share_code')
 
-  if (!parashaId || !sourceUsername || !shareCode) {
-    throw new Error('יש לבחור פרשה, מנהל מקור וקוד שיתוף.')
+  if (!teacherParashaId || !shareCode) {
+    throw new Error('יש לבחור פרשת מקור, פרשת יעד וקוד שיתוף.')
+  }
+
+  if (copyScope === 'single_part' && !sourceLessonPartId) {
+    throw new Error('בייבוא תת־חלק בודד צריך לבחור תת־חלק מקור מוכן.')
+  }
+
+  if (copyScope === 'single_part' && sourceLessonPartId) {
+    const { data: sourcePartOwner, error: sourcePartOwnerError } = await supabase
+      .from('lesson_parts')
+      .select(
+        `
+          id,
+          lesson_groups (
+            teacher_parasha_id
+          )
+        `
+      )
+      .eq('id', sourceLessonPartId)
+      .maybeSingle()
+
+    if (sourcePartOwnerError || !sourcePartOwner) {
+      throw new Error(sourcePartOwnerError?.message ?? 'תת־החלק המקורי לא נמצא.')
+    }
+
+    const sourceGroup = Array.isArray(sourcePartOwner.lesson_groups)
+      ? sourcePartOwner.lesson_groups[0]
+      : sourcePartOwner.lesson_groups
+
+    sourceTeacherParashaId = sourceGroup?.teacher_parasha_id ?? sourceTeacherParashaId
+  }
+
+  if (!sourceTeacherParashaId) {
+    throw new Error('יש לבחור פרשת מקור לייבוא.')
   }
 
   try {
+    const targetTeacherParasha = await getManageableTeacherParasha(teacherParashaId, session)
+
+    const { data: sourceTeacherParasha, error: sourceTeacherParashaError } = await supabase
+      .from('teacher_parashot')
+      .select('id, owner_admin_id, parasha_id, nusach_id, source_teacher_parasha_id')
+      .eq('id', sourceTeacherParashaId)
+      .maybeSingle()
+
+    if (sourceTeacherParashaError || !sourceTeacherParasha) {
+      throw new Error(sourceTeacherParashaError?.message ?? 'פרשת המקור לא נמצאה.')
+    }
+
+    if (sourceTeacherParasha.nusach_id !== targetTeacherParasha.nusach_id) {
+      throw new Error('אפשר להעתיק מבנה רק מפרשה עם אותו נוסח קריאה.')
+    }
+
+    if (sourceTeacherParasha.id === targetTeacherParasha.id) {
+      throw new Error('אי אפשר להעתיק מבנה מאותה פרשה בדיוק.')
+    }
+
     const { data: sourceAdmin, error: sourceAdminError } = await supabase
       .from('admins')
       .select('id, share_code_hash')
-      .eq('username', sourceUsername)
+      .eq('id', sourceTeacherParasha.owner_admin_id)
       .maybeSingle()
 
     if (sourceAdminError || !sourceAdmin) {
@@ -725,15 +969,10 @@ export async function copyParashaStructure(formData: FormData) {
       throw new Error('קוד השיתוף אינו תקין.')
     }
 
-    if (sourceAdmin.id === session.id) {
-      throw new Error('אי אפשר להעתיק מבנה מעצמך.')
-    }
-
     const { data: sourceGroups, error: sourceGroupsError } = await supabase
       .from('lesson_groups')
-      .select('id, parasha_id, section_id')
-      .eq('admin_id', sourceAdmin.id)
-      .eq('parasha_id', parashaId)
+      .select('id, teacher_parasha_id, section_id')
+      .eq('teacher_parasha_id', sourceTeacherParasha.id)
       .order('section_id', { ascending: true })
 
     if (sourceGroupsError) {
@@ -759,7 +998,21 @@ export async function copyParashaStructure(formData: FormData) {
       throw new Error(`שגיאה בטעינת תתי־החלקים: ${sourcePartsError.message}`)
     }
 
-    const sourcePartIds = (sourceParts ?? []).map((part) => part.id)
+    const sourcePartRows =
+      (sourceParts ?? []) as Array<{
+        id: number
+        lesson_group_id: number
+        name: string
+        part_order: number
+        is_full_reading: boolean
+        media_kind?: string | null
+        is_visible_to_student?: boolean | null
+        completion_target?: number | null
+        audio_url: string | null
+        video_url?: string | null
+        duration_seconds: number | null
+      }>
+    const sourcePartIds = sourcePartRows.map((part) => part.id)
     let sourceSlides: Array<{
       lesson_part_id: number
       image_url: string
@@ -781,11 +1034,44 @@ export async function copyParashaStructure(formData: FormData) {
       sourceSlides = data ?? []
     }
 
+    const slideCountByPartId = new Map<number, number>()
+
+    for (const slide of sourceSlides) {
+      slideCountByPartId.set(
+        slide.lesson_part_id,
+        (slideCountByPartId.get(slide.lesson_part_id) ?? 0) + 1
+      )
+    }
+
+    const importableSourceParts = sourcePartRows.filter((part) =>
+      isLessonPartImportableForCopy(part, slideCountByPartId)
+    )
+
+    if (importableSourceParts.length === 0) {
+      throw new Error('למנהל המקור אין תתי־חלקים מוכנים לייבוא בפרשה הזאת.')
+    }
+
+    const partsToCopy =
+      copyScope === 'single_part'
+        ? importableSourceParts.filter((part) => part.id === sourceLessonPartId)
+        : importableSourceParts
+
+    if (partsToCopy.length === 0) {
+      throw new Error('תת־החלק שנבחר אינו מוכן לייבוא או שאינו שייך לפרשת המקור.')
+    }
+
+    const sourceGroupIdsToCopy = Array.from(
+      new Set(partsToCopy.map((part) => part.lesson_group_id))
+    )
+    const groupsToCopy = groups.filter((group) => sourceGroupIdsToCopy.includes(group.id))
+    const slidesToCopy = sourceSlides.filter((slide) =>
+      partsToCopy.some((part) => part.id === slide.lesson_part_id)
+    )
+
     const { data: existingGroups, error: existingGroupsError } = await supabase
       .from('lesson_groups')
       .select('id, section_id')
-      .eq('admin_id', session.id)
-      .eq('parasha_id', parashaId)
+      .eq('teacher_parasha_id', targetTeacherParasha.id)
 
     if (existingGroupsError) {
       throw new Error(`שגיאה בטעינת קבוצות היעד: ${existingGroupsError.message}`)
@@ -799,15 +1085,16 @@ export async function copyParashaStructure(formData: FormData) {
     )
     const groupIdMap = new Map<number, number>()
 
-    for (const group of groups) {
+    for (const group of groupsToCopy) {
       let targetGroupId = targetGroupsBySectionId.get(group.section_id)
 
       if (!targetGroupId) {
         const { data, error } = await supabase
           .from('lesson_groups')
           .insert({
-            admin_id: session.id,
-            parasha_id: group.parasha_id,
+            admin_id: targetTeacherParasha.owner_admin_id,
+            parasha_id: targetTeacherParasha.parasha_id,
+            teacher_parasha_id: targetTeacherParasha.id,
             section_id: group.section_id,
           })
           .select('id')
@@ -817,8 +1104,7 @@ export async function copyParashaStructure(formData: FormData) {
           const { data: refetchedGroup, error: refetchError } = await supabase
             .from('lesson_groups')
             .select('id')
-            .eq('admin_id', session.id)
-            .eq('parasha_id', group.parasha_id)
+            .eq('teacher_parasha_id', targetTeacherParasha.id)
             .eq('section_id', group.section_id)
             .maybeSingle()
 
@@ -858,19 +1144,57 @@ export async function copyParashaStructure(formData: FormData) {
     const targetGroupIds = Array.from(new Set(groupIdMap.values()))
 
     if (targetGroupIds.length > 0) {
-      const { error: deletePartsError } = await supabase
-        .from('lesson_parts')
-        .delete()
-        .in('lesson_group_id', targetGroupIds)
+      if (copyScope === 'all') {
+        const { error: deletePartsError } = await supabase
+          .from('lesson_parts')
+          .delete()
+          .in('lesson_group_id', targetGroupIds)
 
-      if (deletePartsError) {
-        throw new Error(`שגיאה בניקוי התוכן הישן: ${deletePartsError.message}`)
+        if (deletePartsError) {
+          throw new Error(`שגיאה בניקוי התוכן הישן: ${deletePartsError.message}`)
+        }
+      } else {
+        const { data: existingTargetParts, error: existingTargetPartsError } = await supabase
+          .from('lesson_parts')
+          .select('id, lesson_group_id, name, part_order')
+          .in('lesson_group_id', targetGroupIds)
+
+        if (existingTargetPartsError) {
+          throw new Error(`שגיאה בטעינת תתי־החלקים הקיימים ביעד: ${existingTargetPartsError.message}`)
+        }
+
+        const partKeysToReplace = new Set(
+          partsToCopy.map((part) => `${groupIdMap.get(part.lesson_group_id)}::${part.part_order}::${part.name}`)
+        )
+        const existingTargetPartIdsToDelete = ((existingTargetParts ?? []) as Array<{
+          id: number
+          lesson_group_id: number
+          name: string
+          part_order: number
+        }>)
+          .filter((part) =>
+            partKeysToReplace.has(`${part.lesson_group_id}::${part.part_order}::${part.name}`)
+          )
+          .map((part) => part.id)
+
+        if (existingTargetPartIdsToDelete.length > 0) {
+          const { error: deleteExistingTargetPartsError } = await supabase
+            .from('lesson_parts')
+            .delete()
+            .in('id', existingTargetPartIdsToDelete)
+
+          if (deleteExistingTargetPartsError) {
+            throw new Error(
+              `שגיאה בניקוי תת־החלק הקיים ביעד: ${deleteExistingTargetPartsError.message}`
+            )
+          }
+        }
       }
     }
 
     const partIdMap = new Map<number, number>()
 
-    for (const part of sourceParts ?? []) {
+    for (const part of partsToCopy) {
       const targetGroupId = groupIdMap.get(part.lesson_group_id)
 
       if (!targetGroupId) {
@@ -903,8 +1227,65 @@ export async function copyParashaStructure(formData: FormData) {
       partIdMap.set(part.id, data.id)
     }
 
-    if (sourceSlides.length > 0) {
-      const slidesPayload = sourceSlides
+    const importScope =
+      copyScope === 'single_part' ? 'selected_parts' : 'full_parasha'
+
+    const { data: importBatch, error: importBatchError } = await supabase
+      .from('teacher_parasha_import_batches')
+      .insert({
+        target_teacher_parasha_id: targetTeacherParasha.id,
+        source_teacher_parasha_id: sourceTeacherParasha.id,
+        imported_by_admin_id: session.id,
+        scope: importScope,
+        note:
+          copyScope === 'single_part'
+            ? `ייבוא תת־חלק בודד: ${partsToCopy[0]?.name ?? ''}`
+            : 'ייבוא מבנה מלא',
+      })
+      .select('id')
+      .single()
+
+    if (importBatchError || !importBatch) {
+      throw new Error(
+        `שגיאה ברישום מקור הייבוא: ${importBatchError?.message ?? 'לא ידוע.'}`
+      )
+    }
+
+    const targetRootSourceId = sourceTeacherParasha.source_teacher_parasha_id ?? sourceTeacherParasha.id
+    const { error: updateTargetTeacherParashaError } = await supabase
+      .from('teacher_parashot')
+      .update({
+        source_teacher_parasha_id: targetRootSourceId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', targetTeacherParasha.id)
+
+    if (updateTargetTeacherParashaError) {
+      throw new Error(
+        `שגיאה בעדכון מקור הייבוא של ספריית היעד: ${updateTargetTeacherParashaError.message}`
+      )
+    }
+
+    const importItemsPayload = Array.from(partIdMap.entries()).map(
+      ([sourcePartId, targetPartId]) => ({
+        import_batch_id: importBatch.id,
+        source_lesson_part_id: sourcePartId,
+        target_lesson_part_id: targetPartId,
+      })
+    )
+
+    if (importItemsPayload.length > 0) {
+      const { error: importItemsError } = await supabase
+        .from('teacher_parasha_import_items')
+        .insert(importItemsPayload)
+
+      if (importItemsError) {
+        throw new Error(`שגיאה ברישום פריטי הייבוא: ${importItemsError.message}`)
+      }
+    }
+
+    if (slidesToCopy.length > 0) {
+      const slidesPayload = slidesToCopy
         .map((slide) => {
           const targetPartId = partIdMap.get(slide.lesson_part_id)
 
@@ -936,8 +1317,8 @@ export async function copyParashaStructure(formData: FormData) {
   } catch (error) {
     console.error('copyParashaStructure failed', {
       sessionAdminId: session.id,
-      parashaId,
-      sourceUsername,
+      teacherParashaId,
+      sourceTeacherParashaId,
       error,
     })
 
@@ -948,9 +1329,25 @@ export async function copyParashaStructure(formData: FormData) {
 }
 
 export async function deleteStudent(formData: FormData) {
-  await requireAdminSession()
+  const session = await requireAdminSession()
   const id = readNumber(formData, 'id')
   if (!id) throw new Error('חסר מזהה תלמיד.')
+
+  if (session.role !== 'primary') {
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .select('admin_id')
+      .eq('id', id)
+      .maybeSingle()
+
+    if (studentError || !student) {
+      throw new Error(studentError?.message ?? 'התלמיד לא נמצא.')
+    }
+
+    if (student.admin_id !== session.id) {
+      throw new Error('אין הרשאה למחוק תלמיד של מלמד אחר.')
+    }
+  }
 
   const { error } = await supabase.from('students').delete().eq('id', id)
   if (error) throw new Error(error.message)
@@ -960,7 +1357,8 @@ export async function deleteStudent(formData: FormData) {
 }
 
 export async function deleteParasha(formData: FormData) {
-  await requireAdminSession()
+  const session = await requireAdminSession()
+  if (session.role !== 'primary') throw new Error('רק מנהל ראשי יכול למחוק פרשה כללית.')
   const id = readNumber(formData, 'id')
   if (!id) throw new Error('חסר מזהה פרשה.')
 
@@ -970,7 +1368,8 @@ export async function deleteParasha(formData: FormData) {
 }
 
 export async function deleteSection(formData: FormData) {
-  await requireAdminSession()
+  const session = await requireAdminSession()
+  if (session.role !== 'primary') throw new Error('רק מנהל ראשי יכול למחוק חלק כללי.')
   const id = readNumber(formData, 'id')
   if (!id) throw new Error('חסר מזהה חלק.')
 
@@ -980,9 +1379,11 @@ export async function deleteSection(formData: FormData) {
 }
 
 export async function deleteLessonPart(formData: FormData) {
-  await requireAdminSession()
+  const session = await requireAdminSession()
   const id = readNumber(formData, 'id')
   if (!id) throw new Error('חסר מזהה תת-חלק.')
+
+  await getManageableLessonPart(id, session)
 
   const { error } = await supabase.from('lesson_parts').delete().eq('id', id)
   if (error) throw new Error(error.message)
@@ -991,9 +1392,21 @@ export async function deleteLessonPart(formData: FormData) {
 }
 
 export async function deleteLessonSlide(formData: FormData) {
-  await requireAdminSession()
+  const session = await requireAdminSession()
   const id = readNumber(formData, 'id')
   if (!id) throw new Error('חסר מזהה שקופית.')
+
+  const { data: slide, error: slideError } = await supabase
+    .from('lesson_slides')
+    .select('lesson_part_id')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (slideError || !slide) {
+    throw new Error(slideError?.message ?? 'השקופית לא נמצאה.')
+  }
+
+  await getManageableLessonPart(slide.lesson_part_id, session)
 
   const { error } = await supabase.from('lesson_slides').delete().eq('id', id)
   if (error) throw new Error(error.message)
@@ -1012,7 +1425,150 @@ export async function deleteAdmin(formData: FormData) {
   if (!id) throw new Error('חסר מזהה מנהל.')
   if (session.id === id) throw new Error('לא ניתן למחוק את המנהל שמחובר כרגע.')
 
-  const { error } = await supabase.from('admins').delete().eq('id', id)
+  const { error } = await supabase
+    .from('admins')
+    .update({
+      status: 'inactive',
+      deactivated_at: new Date().toISOString(),
+    })
+    .eq('id', id)
   if (error) throw new Error(error.message)
   revalidatePath('/admin')
+}
+
+export async function upsertTeacherParasha(formData: FormData) {
+  const session = await requireAdminSession()
+
+  const id = readNumber(formData, 'id')
+  const baseParashaId = readNumber(formData, 'base_parasha_id')
+  const nusachId = readNumber(formData, 'nusach_id')
+  const status =
+    readString(formData, 'status') === 'draft'
+      ? 'draft'
+      : readString(formData, 'status') === 'frozen'
+        ? 'frozen'
+        : readString(formData, 'status') === 'archived'
+          ? 'archived'
+          : 'active'
+  const freezeReason = readString(formData, 'freeze_reason')
+  const notes = readString(formData, 'notes')
+  const ownerAdminId =
+    session.role === 'primary'
+      ? (readNumber(formData, 'owner_admin_id') ?? session.id)
+      : session.id
+
+  if (!baseParashaId || !nusachId || !ownerAdminId) {
+    throw new Error('יש לבחור פרשה בסיסית, נוסח ומלמד בעלים.')
+  }
+
+  const validAdminId = await resolveValidAdminId(ownerAdminId)
+
+  if (!validAdminId) {
+    throw new Error('לא נמצא מלמד בעלים תקין.')
+  }
+
+  if (id) {
+    await getManageableTeacherParasha(id, session)
+    const { error } = await supabase
+      .from('teacher_parashot')
+      .update({
+        owner_admin_id: validAdminId,
+        parasha_id: baseParashaId,
+        nusach_id: nusachId,
+        status,
+        freeze_reason: freezeReason || null,
+        notes: notes || null,
+        updated_at: new Date().toISOString(),
+        frozen_at: status === 'frozen' ? new Date().toISOString() : null,
+        archived_at: status === 'archived' ? new Date().toISOString() : null,
+      })
+      .eq('id', id)
+
+    if (error) throw new Error(error.message)
+  } else {
+    const { data: maxVariantRow, error: maxVariantError } = await supabase
+      .from('teacher_parashot')
+      .select('variant_number')
+      .eq('owner_admin_id', validAdminId)
+      .eq('parasha_id', baseParashaId)
+      .eq('nusach_id', nusachId)
+      .order('variant_number', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (maxVariantError) {
+      throw new Error(maxVariantError.message)
+    }
+
+    const variantNumber = (maxVariantRow?.variant_number ?? 0) + 1
+    const { error } = await supabase.from('teacher_parashot').insert({
+      owner_admin_id: validAdminId,
+      parasha_id: baseParashaId,
+      nusach_id: nusachId,
+      variant_number: variantNumber,
+      status,
+      freeze_reason: freezeReason || null,
+      notes: notes || null,
+      created_by_admin_id: session.id,
+    })
+
+    if (error) throw new Error(error.message)
+  }
+
+  revalidatePath('/admin')
+}
+
+export async function setTeacherParashaStatus(formData: FormData) {
+  const session = await requireAdminSession()
+  const id = readNumber(formData, 'id')
+  const status = readString(formData, 'status')
+  const freezeReason = readString(formData, 'freeze_reason')
+
+  if (!id) {
+    throw new Error('חסר מזהה פרשת מלמד.')
+  }
+
+  if (!['active', 'frozen', 'archived', 'draft'].includes(status)) {
+    throw new Error('סטטוס לא תקין.')
+  }
+
+  await getManageableTeacherParasha(id, session)
+
+  const { error } = await supabase
+    .from('teacher_parashot')
+    .update({
+      status,
+      freeze_reason: status === 'frozen' ? freezeReason || null : null,
+      updated_at: new Date().toISOString(),
+      frozen_at: status === 'frozen' ? new Date().toISOString() : null,
+      archived_at: status === 'archived' ? new Date().toISOString() : null,
+    })
+    .eq('id', id)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  revalidatePath('/admin')
+  revalidatePath('/student')
+}
+
+export async function deleteTeacherParasha(formData: FormData) {
+  const session = await requireAdminSession()
+  const id = readNumber(formData, 'id')
+
+  if (!id) {
+    throw new Error('חסר מזהה ספריית פרשה.')
+  }
+
+  await getManageableTeacherParasha(id, session)
+
+  const { error } = await supabase.from('teacher_parashot').delete().eq('id', id)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  revalidatePath('/admin')
+  revalidatePath('/student')
 }

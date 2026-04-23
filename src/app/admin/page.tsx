@@ -4,17 +4,18 @@ import { redirect } from 'next/navigation'
 import { getAdminDashboardData } from '@/lib/admin-data'
 import { getAdminSession } from '@/lib/admin-auth'
 import { getLessonMediaKindLabel } from '@/lib/lesson-media'
+import { supabase } from '@/lib/supabase'
 import {
   copyParashaStructure,
+  deleteTeacherParasha,
   deleteAdmin,
   deleteLessonPart,
   deleteLessonSlide,
-  deleteParasha,
-  deleteSection,
   deleteStudentRecordingFromAdmin,
   deleteStudent,
   ensureLessonGroup,
   logoutAdmin,
+  setTeacherParashaStatus,
   updateMyShareCode,
   resetStudentPartProgress,
   updateStudentPartVisibility,
@@ -24,9 +25,16 @@ import {
   upsertParasha,
   upsertSection,
   upsertStudent,
+  upsertTeacherParasha,
 } from './actions'
 import { AudioDuration } from './audio-duration'
 import { AdminContentSelector } from './selectors'
+
+type SectionContentSummary = {
+  sectionId: number
+  partCount: number
+  hasContent: boolean
+}
 
 type AdminPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -36,6 +44,40 @@ function toNumber(value: string | string[] | undefined) {
   const raw = Array.isArray(value) ? value[0] : value
   const parsed = Number(raw)
   return Number.isFinite(parsed) ? parsed : null
+}
+
+function toStringParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value ?? ''
+}
+
+function getTeacherParashaStatusLabel(status: string) {
+  switch (status) {
+    case 'active':
+      return 'פעילה'
+    case 'frozen':
+      return 'קפואה'
+    case 'draft':
+      return 'טיוטה'
+    case 'archived':
+      return 'ארכיון'
+    default:
+      return status
+  }
+}
+
+function getTeacherParashaStatusClass(status: string) {
+  switch (status) {
+    case 'active':
+      return 'bg-emerald-100 text-emerald-900'
+    case 'frozen':
+      return 'bg-amber-100 text-amber-900'
+    case 'draft':
+      return 'bg-slate-200 text-slate-700'
+    case 'archived':
+      return 'bg-rose-100 text-rose-900'
+    default:
+      return 'bg-slate-100 text-slate-700'
+  }
 }
 
 function DisclosureSection({
@@ -80,9 +122,21 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   const selectedSectionId = toNumber(resolvedSearchParams.sectionId)
   const selectedPartId = toNumber(resolvedSearchParams.partId)
   const parsedTrackingStudentId = toNumber(resolvedSearchParams.trackingStudentId)
+  const selectedOwnerAdminId = toNumber(resolvedSearchParams.ownerAdminId)
+  const selectedTeacherParashaStatus = toStringParam(resolvedSearchParams.teacherParashaStatus)
+  const selectedBaseParashaFilterId = toNumber(resolvedSearchParams.baseParashaFilterId)
+  const selectedNusachFilterId = toNumber(resolvedSearchParams.nusachFilterId)
+  const selectedLibraryView = toStringParam(resolvedSearchParams.libraryView) || 'single'
+  const selectedStudentView = toStringParam(resolvedSearchParams.studentView) || 'single'
+  const selectedAdminView = toStringParam(resolvedSearchParams.adminView) || 'single'
+  const selectedStudentCardId = toNumber(resolvedSearchParams.studentId)
+  const selectedAdminCardId = toNumber(resolvedSearchParams.adminId)
 
   const {
     parashot,
+    teacherParashot = [],
+    allTeacherParashot = [],
+    nusachim = [],
     sections,
     students,
     admins,
@@ -102,19 +156,105 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     sectionId: selectedSectionId,
     partId: selectedPartId,
     trackingStudentId: parsedTrackingStudentId,
+    ownerAdminId: selectedOwnerAdminId,
+    teacherParashaStatus: selectedTeacherParashaStatus || null,
+    baseParashaFilterId: selectedBaseParashaFilterId,
+    nusachFilterId: selectedNusachFilterId,
   }, session)
 
-  const selectedParasha = parashot.find((parasha) => parasha.id === activeParashaId)
+  const selectedTeacherParasha =
+    teacherParashot.find((parasha) => parasha.id === activeParashaId) ?? null
+  const selectedParasha =
+    parashot.find((parasha) => parasha.id === selectedTeacherParasha?.parasha_id) ?? null
   const selectedSection = sections.find((section) => section.id === activeSectionId)
   const selectedPart = lessonParts.find((part) => part.id === activePartId) ?? null
   const selectedPartMediaKind =
     selectedPart?.media_kind === 'video' || selectedPart?.video_url
       ? 'video'
       : 'audio_slides'
+  const selectedPartPrimarySlide = lessonSlides[0] ?? null
   const unassignedStudents = students.filter(
     (student) => !managerByStudentId[student.id]
   ).length
   const trackingRows = trackingSummary?.rows ?? []
+  const selectedLibraryCardId = activeParashaId ?? teacherParashot[0]?.id ?? null
+  const selectedStudentCard =
+    students.find((student) => student.id === selectedStudentCardId) ?? students[0] ?? null
+  const selectedAdminCard =
+    admins.find((admin) => admin.id === selectedAdminCardId) ?? admins[0] ?? null
+  const visibleTeacherParashot =
+    selectedLibraryView === 'all'
+      ? teacherParashot
+      : teacherParashot.filter((parasha) => parasha.id === selectedLibraryCardId)
+  const visibleStudents =
+    selectedStudentView === 'all'
+      ? students
+      : selectedStudentCard
+        ? students.filter((student) => student.id === selectedStudentCard.id)
+        : []
+  const visibleAdmins =
+    selectedAdminView === 'all'
+      ? admins
+      : selectedAdminCard
+        ? admins.filter((admin) => admin.id === selectedAdminCard.id)
+        : []
+  const teacherParashaStatusCounts = {
+    active: teacherParashot.filter((item) => item.status === 'active').length,
+    frozen: teacherParashot.filter((item) => item.status === 'frozen').length,
+    draft: teacherParashot.filter((item) => item.status === 'draft').length,
+    archived: teacherParashot.filter((item) => item.status === 'archived').length,
+  }
+  const allImportableSourceParts = parashaSources.flatMap((source) =>
+    source.importableParts.map((part) => ({
+      ...part,
+      sourceLabel: `${source.displayName} | ${part.sectionName} | ${part.partName}`,
+      teacherParashaId: source.teacherParashaId,
+    }))
+  )
+  let sectionSummaries: SectionContentSummary[] = sections.map((section) => ({
+    sectionId: section.id,
+    partCount: 0,
+    hasContent: false,
+  }))
+
+  if (activeParashaId) {
+    const { data: sectionGroups } = await supabase
+      .from('lesson_groups')
+      .select('id, section_id')
+      .eq('teacher_parasha_id', activeParashaId)
+
+    const groups = (sectionGroups ?? []) as Array<{ id: number; section_id: number }>
+
+    if (groups.length > 0) {
+      const { data: groupParts } = await supabase
+        .from('lesson_parts')
+        .select('lesson_group_id')
+        .in(
+          'lesson_group_id',
+          groups.map((group) => group.id)
+        )
+
+      const partCountByGroupId = new Map<number, number>()
+
+      for (const part of (groupParts ?? []) as Array<{ lesson_group_id: number }>) {
+        partCountByGroupId.set(
+          part.lesson_group_id,
+          (partCountByGroupId.get(part.lesson_group_id) ?? 0) + 1
+        )
+      }
+
+      sectionSummaries = sections.map((section) => {
+        const group = groups.find((row) => row.section_id === section.id)
+        const partCount = group ? partCountByGroupId.get(group.id) ?? 0 : 0
+
+        return {
+          sectionId: section.id,
+          partCount,
+          hasContent: partCount > 0,
+        }
+      })
+    }
+  }
 
   return (
     <main className="min-h-screen bg-slate-50 p-4 sm:p-6">
@@ -444,11 +584,39 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           <div className="order-6">
             <DisclosureSection
               title="ניהול מנהלים"
-              description="מנהל ראשי יכול להוסיף מנהלים, לשנות תפקיד, ולעדכן פרטי כניסה."
+              description="מנהל ראשי יכול להוסיף מנהלים, לשנות תפקיד, ולעדכן פרטי כניסה. כברירת מחדל מוצג מנהל אחד בלבד."
             >
+              <form className="grid gap-3 rounded-3xl bg-slate-50 p-4 md:grid-cols-[12rem_1fr_auto]">
+                <select
+                  name="adminView"
+                  defaultValue={selectedAdminView}
+                  className="rounded-2xl border border-slate-200 px-4 py-3"
+                >
+                  <option value="single">מנהל אחד</option>
+                  <option value="all">כל המנהלים</option>
+                </select>
+                <select
+                  name="adminId"
+                  defaultValue={selectedAdminCard?.id ?? ''}
+                  className="rounded-2xl border border-slate-200 px-4 py-3"
+                >
+                  <option value="">בחירת מנהל</option>
+                  {admins.map((admin) => (
+                    <option key={admin.id} value={admin.id}>
+                      {admin.display_name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
+                >
+                  סינון
+                </button>
+              </form>
               <div className="mt-6 grid gap-6 xl:grid-cols-2">
                 <div className="space-y-4">
-                  {admins.map((admin) => (
+                  {visibleAdmins.length > 0 ? visibleAdmins.map((admin) => (
                     <form key={admin.id} action={upsertAdmin} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
                       <input type="hidden" name="id" value={admin.id} />
                       <input
@@ -459,6 +627,19 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                       <input
                         name="username"
                         defaultValue={admin.username}
+                        className="rounded-2xl border border-slate-200 px-4 py-3"
+                      />
+                      <input
+                        name="city"
+                        defaultValue={admin.city ?? ''}
+                        placeholder="עיר / יישוב"
+                        className="rounded-2xl border border-slate-200 px-4 py-3"
+                      />
+                      <input
+                        name="email"
+                        type="email"
+                        defaultValue={admin.email ?? ''}
+                        placeholder="אימייל"
                         className="rounded-2xl border border-slate-200 px-4 py-3"
                       />
                       <input
@@ -491,7 +672,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         </button>
                       </div>
                     </form>
-                  ))}
+                  )) : (
+                    <div className="rounded-3xl bg-slate-50 p-5 text-sm text-slate-500 ring-1 ring-slate-200">
+                      לא נבחר מנהל להצגה.
+                    </div>
+                  )}
                 </div>
 
                 <form action={upsertAdmin} className="grid gap-3 rounded-3xl bg-blue-50 p-4">
@@ -504,6 +689,17 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   <input
                     name="username"
                     placeholder="שם משתמש"
+                    className="rounded-2xl border border-slate-200 px-4 py-3"
+                  />
+                  <input
+                    name="city"
+                    placeholder="עיר / יישוב"
+                    className="rounded-2xl border border-slate-200 px-4 py-3"
+                  />
+                  <input
+                    name="email"
+                    type="email"
+                    placeholder="אימייל"
                     className="rounded-2xl border border-slate-200 px-4 py-3"
                   />
                   <input
@@ -532,121 +728,294 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           </div>
         ) : null}
 
-        <div className="order-5 grid gap-6 xl:grid-cols-3">
+        <div className="order-5 grid items-start gap-6 xl:grid-cols-[1.6fr_1fr]">
+          <div className="xl:col-span-2">
           <DisclosureSection
-            title="פרשות"
-            description="הצג או ערוך את רשימת הפרשיות במערכת."
+            title="ספריות פרשה של מלמדים"
+            description="כאן יוצרים פרשת עבודה למלמד, קובעים נוסח, ורואים אם הפרשה פעילה או קפואה."
           >
-            <div className="mt-5 space-y-3">
-              {parashot.map((parasha) => (
-                <form key={parasha.id} action={upsertParasha} className="grid gap-3">
-                  <input type="hidden" name="id" value={parasha.id} />
-                  <input
-                    name="name"
-                    defaultValue={parasha.name}
-                    className="rounded-2xl border border-slate-200 px-4 py-3"
-                  />
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <button
-                      type="submit"
-                      className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
-                    >
-                      שמירת פרשה
-                    </button>
-                    <button
-                      formAction={deleteParasha}
-                      type="submit"
-                      className="rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white"
-                    >
-                      מחיקת פרשה
-                    </button>
-                  </div>
-                </form>
-              ))}
+            <div className="grid gap-3 md:grid-cols-4">
+              <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">
+                <div className="text-xs text-slate-500">פעילות</div>
+                <div className="mt-1 text-2xl font-black text-emerald-700">{teacherParashaStatusCounts.active}</div>
+              </div>
+              <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">
+                <div className="text-xs text-slate-500">קפואות</div>
+                <div className="mt-1 text-2xl font-black text-amber-700">{teacherParashaStatusCounts.frozen}</div>
+              </div>
+              <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">
+                <div className="text-xs text-slate-500">טיוטות</div>
+                <div className="mt-1 text-2xl font-black text-slate-700">{teacherParashaStatusCounts.draft}</div>
+              </div>
+              <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">
+                <div className="text-xs text-slate-500">ארכיון</div>
+                <div className="mt-1 text-2xl font-black text-rose-700">{teacherParashaStatusCounts.archived}</div>
+              </div>
             </div>
 
-            <form action={upsertParasha} className="mt-6 grid gap-3 rounded-3xl bg-slate-50 p-4">
-              <h3 className="text-lg font-semibold text-slate-900">הוספת פרשה</h3>
-              <input
-                name="name"
-                placeholder="למשל: וירא"
+            <form className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_1fr_1fr_1.4fr_auto]">
+              {activeParashaId ? <input type="hidden" name="parashaId" value={activeParashaId} /> : null}
+              {activeSectionId ? <input type="hidden" name="sectionId" value={activeSectionId} /> : null}
+              {activePartId ? <input type="hidden" name="partId" value={activePartId} /> : null}
+              {selectedTrackingStudentId ? <input type="hidden" name="trackingStudentId" value={selectedTrackingStudentId} /> : null}
+              {session.role === 'primary' ? (
+                <select
+                  name="ownerAdminId"
+                  defaultValue={selectedOwnerAdminId ?? ''}
+                  className="rounded-2xl border border-slate-200 px-4 py-3"
+                >
+                  <option value="">כל המלמדים</option>
+                  {admins.map((admin) => (
+                    <option key={admin.id} value={admin.id}>
+                      {admin.display_name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input type="hidden" name="ownerAdminId" value={session.id ?? ''} />
+              )}
+              <select
+                name="baseParashaFilterId"
+                defaultValue={selectedBaseParashaFilterId ?? ''}
                 className="rounded-2xl border border-slate-200 px-4 py-3"
-              />
+              >
+                <option value="">כל הפרשות</option>
+                {parashot.map((parasha) => (
+                  <option key={parasha.id} value={parasha.id}>
+                    {parasha.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                name="nusachFilterId"
+                defaultValue={selectedNusachFilterId ?? ''}
+                className="rounded-2xl border border-slate-200 px-4 py-3"
+              >
+                <option value="">כל הנוסחים</option>
+                {nusachim.filter((nusach) => nusach.slug !== 'unspecified').map((nusach) => (
+                  <option key={nusach.id} value={nusach.id}>
+                    {nusach.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                name="teacherParashaStatus"
+                defaultValue={selectedTeacherParashaStatus || 'all'}
+                className="rounded-2xl border border-slate-200 px-4 py-3"
+              >
+                <option value="all">כל הסטטוסים</option>
+                <option value="active">פעילה</option>
+                <option value="frozen">קפואה</option>
+                <option value="draft">טיוטה</option>
+                <option value="archived">ארכיון</option>
+              </select>
+              <select
+                name="libraryView"
+                defaultValue={selectedLibraryView}
+                className="rounded-2xl border border-slate-200 px-4 py-3"
+              >
+                <option value="single">ספרייה אחת</option>
+                <option value="all">כל הספריות</option>
+              </select>
+              <select
+                name="parashaId"
+                defaultValue={selectedLibraryCardId ?? ''}
+                className="rounded-2xl border border-slate-200 px-4 py-3"
+              >
+                <option value="">בחירת ספרייה</option>
+                {teacherParashot.map((teacherParasha) => (
+                  <option key={teacherParasha.id} value={teacherParasha.id}>
+                    {teacherParasha.internal_display_name} | {teacherParasha.owner_display_name}
+                  </option>
+                ))}
+              </select>
               <button
                 type="submit"
-                className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
+                className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
               >
-                הוספת פרשה חדשה
+                סינון ספריות
+              </button>
+            </form>
+
+            <div className="mt-5 space-y-4">
+              {visibleTeacherParashot.length > 0 ? (
+                visibleTeacherParashot.map((teacherParasha) => (
+                  <div key={teacherParasha.id}>
+                    <form action={upsertTeacherParasha} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
+                      <input type="hidden" name="id" value={teacherParasha.id} />
+                      <input type="hidden" name="status" value={teacherParasha.status} />
+                      {session.role === 'primary' ? (
+                        <select
+                          name="owner_admin_id"
+                          defaultValue={teacherParasha.owner_admin_id}
+                          className="rounded-2xl border border-slate-200 px-4 py-3"
+                        >
+                          {admins.map((admin) => (
+                            <option key={admin.id} value={admin.id}>
+                              {admin.display_name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input type="hidden" name="owner_admin_id" value={teacherParasha.owner_admin_id} />
+                      )}
+                      <select
+                        name="base_parasha_id"
+                        defaultValue={teacherParasha.parasha_id}
+                        className="rounded-2xl border border-slate-200 px-4 py-3"
+                      >
+                        {parashot.map((parasha) => (
+                          <option key={parasha.id} value={parasha.id}>
+                            {parasha.name}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        name="nusach_id"
+                        defaultValue={teacherParasha.nusach_id}
+                        className="rounded-2xl border border-slate-200 px-4 py-3"
+                      >
+                        {nusachim.filter((nusach) => nusach.slug !== 'unspecified').map((nusach) => (
+                          <option key={nusach.id} value={nusach.id}>
+                            {nusach.name}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-700 ring-1 ring-slate-200">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <span>{teacherParasha.internal_display_name} | {teacherParasha.nusach_name}</span>
+                          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${getTeacherParashaStatusClass(teacherParasha.status)}`}>
+                            {getTeacherParashaStatusLabel(teacherParasha.status)}
+                          </span>
+                        </div>
+                      </div>
+                      <input
+                        name="freeze_reason"
+                        defaultValue={teacherParasha.freeze_reason ?? ''}
+                        placeholder="סיבת הקפאה"
+                        className="rounded-2xl border border-slate-200 px-4 py-3"
+                      />
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <button
+                          type="submit"
+                          className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
+                        >
+                          שמירת ספרייה
+                        </button>
+                        <div />
+                      </div>
+                    </form>
+                    <form action={setTeacherParashaStatus} className="mt-3">
+                      <input type="hidden" name="id" value={teacherParasha.id} />
+                      <input
+                        type="hidden"
+                        name="status"
+                        value={teacherParasha.status === 'frozen' ? 'active' : 'frozen'}
+                      />
+                      <input
+                        type="hidden"
+                        name="freeze_reason"
+                        value={teacherParasha.freeze_reason ?? ''}
+                      />
+                      <button
+                        type="submit"
+                        className="w-full rounded-2xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white"
+                      >
+                        {teacherParasha.status === 'frozen' ? 'החזרה לפעיל' : 'הקפאה'}
+                      </button>
+                    </form>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-3xl bg-slate-50 p-5 text-sm text-slate-500 ring-1 ring-slate-200">
+                  לא נמצאה ספרייה להצגה לפי הבחירה שבוצעה.
+                </div>
+              )}
+            </div>
+
+            <form action={upsertTeacherParasha} className="mt-6 grid gap-3 rounded-3xl bg-slate-50 p-4">
+              <h3 className="text-lg font-semibold text-slate-900">יצירת ספריית פרשה חדשה</h3>
+              {session.role === 'primary' ? (
+                <select
+                  name="owner_admin_id"
+                  defaultValue={session.id ?? ''}
+                  className="rounded-2xl border border-slate-200 px-4 py-3"
+                >
+                  {admins.map((admin) => (
+                    <option key={admin.id} value={admin.id}>
+                      {admin.display_name}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+              <select
+                name="base_parasha_id"
+                defaultValue=""
+                className="rounded-2xl border border-slate-200 px-4 py-3"
+              >
+                <option value="">בחירת פרשה</option>
+                {parashot.map((parasha) => (
+                  <option key={parasha.id} value={parasha.id}>
+                    {parasha.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                name="nusach_id"
+                defaultValue=""
+                className="rounded-2xl border border-slate-200 px-4 py-3"
+              >
+                <option value="">בחירת נוסח</option>
+                {nusachim.filter((nusach) => nusach.slug !== 'unspecified').map((nusach) => (
+                  <option key={nusach.id} value={nusach.id}>
+                    {nusach.name}
+                  </option>
+                ))}
+              </select>
+                  <button
+                    type="submit"
+                    className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
+                  >
+                    יצירת ספריית פרשה
               </button>
             </form>
           </DisclosureSection>
-
-          <DisclosureSection
-            title="חלקים ראשיים"
-            description="כאן מגדירים ראשון, שני, שלישי וכן הלאה."
-          >
-            <div className="mt-5 space-y-3">
-              {sections.map((section) => (
-                <form key={section.id} action={upsertSection} className="grid gap-3">
-                  <input type="hidden" name="id" value={section.id} />
-                  <input
-                    name="name"
-                    defaultValue={section.name}
-                    className="rounded-2xl border border-slate-200 px-4 py-3"
-                  />
-                  <input
-                    name="order_index"
-                    type="number"
-                    defaultValue={section.order_index}
-                    className="rounded-2xl border border-slate-200 px-4 py-3"
-                  />
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <button
-                      type="submit"
-                      className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
-                    >
-                      שמירת חלק
-                    </button>
-                    <button
-                      formAction={deleteSection}
-                      type="submit"
-                      className="rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white"
-                    >
-                      מחיקת חלק
-                    </button>
-                  </div>
-                </form>
-              ))}
-            </div>
-
-            <form action={upsertSection} className="mt-6 grid gap-3 rounded-3xl bg-slate-50 p-4">
-              <h3 className="text-lg font-semibold text-slate-900">הוספת חלק חדש</h3>
-              <input
-                name="name"
-                placeholder="למשל: מפטיר"
-                className="rounded-2xl border border-slate-200 px-4 py-3"
-              />
-              <input
-                name="order_index"
-                type="number"
-                placeholder="סדר תצוגה"
-                className="rounded-2xl border border-slate-200 px-4 py-3"
-              />
-              <button
-                type="submit"
-                className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
-              >
-                הוספת חלק
-              </button>
-            </form>
-          </DisclosureSection>
+          </div>
 
         <DisclosureSection
           title="תלמידי המנהל"
-          description="כאן עורכים רק את תלמידי המנהל המחובר, עם שם משתמש וסיסמה אישיים."
+          description="כאן עורכים את התלמידים דרך סינון רגוע יותר: תלמיד אחד או הכול."
         >
-              <div className="mt-5 space-y-4">
+            <form className="grid gap-3 rounded-3xl bg-slate-50 p-4 md:grid-cols-[12rem_1fr_auto]">
+              <select
+                name="studentView"
+                defaultValue={selectedStudentView}
+                className="rounded-2xl border border-slate-200 px-4 py-3"
+              >
+                <option value="single">תלמיד אחד</option>
+                <option value="all">כל התלמידים</option>
+              </select>
+              <select
+                name="studentId"
+                defaultValue={selectedStudentCard?.id ?? ''}
+                className="rounded-2xl border border-slate-200 px-4 py-3"
+              >
+                <option value="">בחירת תלמיד</option>
                 {students.map((student) => (
+                  <option key={student.id} value={student.id}>
+                    {student.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="submit"
+                className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
+              >
+                סינון
+              </button>
+            </form>
+              <div className="mt-5 space-y-4">
+                {visibleStudents.length > 0 ? visibleStudents.map((student) => (
                   <form key={student.id} action={upsertStudent} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
                     <input type="hidden" name="id" value={student.id} />
                 <input
@@ -666,14 +1035,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   className="rounded-2xl border border-slate-200 px-4 py-3"
                 />
                 <select
-                  name="parasha_id"
-                  defaultValue={student.parasha_id ?? ''}
+                  name="teacher_parasha_id"
+                  defaultValue={student.active_teacher_parasha_id ?? ''}
                   className="rounded-2xl border border-slate-200 px-4 py-3"
                 >
-                    <option value="">ללא פרשה</option>
-                      {parashot.map((parasha) => (
+                    <option value="">ללא ספריית פרשה</option>
+                      {allTeacherParashot.map((parasha) => (
                         <option key={parasha.id} value={parasha.id}>
-                          {parasha.name}
+                          {parasha.internal_display_name}
                         </option>
                       ))}
                     </select>
@@ -694,7 +1063,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                       </button>
                     </div>
                   </form>
-                ))}
+                )) : (
+                  <div className="rounded-3xl bg-slate-50 p-5 text-sm text-slate-500 ring-1 ring-slate-200">
+                    לא נבחר תלמיד להצגה.
+                  </div>
+                )}
               </div>
 
             <form action={upsertStudent} className="mt-6 grid gap-3 rounded-3xl bg-slate-50 p-4">
@@ -716,14 +1089,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               className="rounded-2xl border border-slate-200 px-4 py-3"
             />
             <select
-              name="parasha_id"
+              name="teacher_parasha_id"
               defaultValue=""
               className="rounded-2xl border border-slate-200 px-4 py-3"
             >
-                <option value="">בחירת פרשה</option>
-                {parashot.map((parasha) => (
+                <option value="">בחירת ספריית פרשה</option>
+                {allTeacherParashot.map((parasha) => (
                   <option key={parasha.id} value={parasha.id}>
-                    {parasha.name}
+                    {parasha.internal_display_name}
                     </option>
                   ))}
                 </select>
@@ -732,6 +1105,54 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
                 >
                 הוספת תלמיד
+              </button>
+            </form>
+          </DisclosureSection>
+        </div>
+
+        <div className="order-[5] grid items-start gap-6 xl:grid-cols-[1fr_1fr]">
+          <DisclosureSection
+            title="פרשות"
+            description="כאן מוסיפים פרשה חדשה בלבד. אם השם כבר קיים, המערכת תציג הודעה מתאימה."
+          >
+            <form action={upsertParasha} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
+              <h3 className="text-lg font-semibold text-slate-900">הוספת פרשה</h3>
+              <input
+                name="name"
+                placeholder="למשל: וירא"
+                className="rounded-2xl border border-slate-200 px-4 py-3"
+              />
+              <button
+                type="submit"
+                className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
+              >
+                הוספת פרשה חדשה
+              </button>
+            </form>
+          </DisclosureSection>
+
+          <DisclosureSection
+            title="חלקים ראשיים"
+            description="כאן מוסיפים חלק ראשי חדש בלבד. אם השם כבר קיים, המערכת תציג הודעה מתאימה."
+          >
+            <form action={upsertSection} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
+              <h3 className="text-lg font-semibold text-slate-900">הוספת חלק חדש</h3>
+              <input
+                name="name"
+                placeholder="למשל: מפטיר"
+                className="rounded-2xl border border-slate-200 px-4 py-3"
+              />
+              <input
+                name="order_index"
+                type="number"
+                placeholder="סדר תצוגה"
+                className="rounded-2xl border border-slate-200 px-4 py-3"
+              />
+              <button
+                type="submit"
+                className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
+              >
+                הוספת חלק
               </button>
             </form>
           </DisclosureSection>
@@ -754,8 +1175,9 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           <div className="mt-6">
             <AdminContentSelector
               key={`${activeParashaId ?? 'none'}-${activeSectionId ?? 'none'}-${activePartId ?? 'none'}`}
-              parashot={parashot}
+              teacherParashot={teacherParashot}
               sections={sections}
+              sectionSummaries={sectionSummaries}
               lessonParts={lessonParts}
               selectedParashaId={activeParashaId}
               selectedSectionId={activeSectionId}
@@ -767,8 +1189,18 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             <div className="rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
               <p className="text-sm text-slate-500">פרשה נבחרת</p>
               <p className="mt-2 text-2xl font-black text-slate-900">
-                {selectedParasha?.name ?? 'לא נבחרה'}
+                {selectedTeacherParasha?.internal_display_name ?? 'לא נבחרה'}
               </p>
+              {selectedTeacherParasha ? (
+                <div className="mt-2 space-y-1 text-xs text-slate-500">
+                  <p>
+                    {selectedTeacherParasha.owner_display_name} | {selectedTeacherParasha.nusach_name} | {getTeacherParashaStatusLabel(selectedTeacherParasha.status)}
+                  </p>
+                  {selectedTeacherParasha.source_teacher_parasha_id ? (
+                    <p>ספרייה זו נבנתה על בסיס ייבוא קודם.</p>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
             <div className="rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
               <p className="text-sm text-slate-500">חלק נבחר</p>
@@ -784,28 +1216,173 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             </div>
           </div>
 
-          {selectedParasha ? (
+          {selectedTeacherParasha ? (
+            <div className="mt-6 grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+              <div className="rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                <h3 className="text-lg font-semibold text-slate-900">תצוגת תוכן לספרייה הנבחרת</h3>
+                <p className="mt-2 text-sm text-slate-600">
+                  כאן אפשר לעיין במדיה של התת־חלק הפתוח בלי להיכנס לשדות העריכה.
+                </p>
+
+                {selectedPart ? (
+                  <div className="mt-4 grid gap-4">
+                    <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+                      <div className="text-sm font-semibold text-slate-900">{selectedPart.name}</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {selectedSection?.name ?? 'ללא חלק'} | {getLessonMediaKindLabel(selectedPartMediaKind)}
+                      </div>
+                    </div>
+
+                    {selectedPartMediaKind === 'video' && selectedPart.video_url ? (
+                      <video
+                        controls
+                        className="w-full rounded-3xl bg-slate-900 ring-1 ring-slate-200"
+                        src={selectedPart.video_url}
+                      />
+                    ) : null}
+
+                    {selectedPartMediaKind === 'audio_slides' && selectedPart.audio_url ? (
+                      <audio
+                        controls
+                        className="w-full rounded-2xl bg-white p-3 ring-1 ring-slate-200"
+                        src={selectedPart.audio_url}
+                      />
+                    ) : null}
+
+                    {selectedPartMediaKind === 'audio_slides' && selectedPartPrimarySlide ? (
+                      <img
+                        src={selectedPartPrimarySlide.image_url}
+                        alt={selectedPart.name}
+                        className="max-h-[22rem] w-full rounded-3xl bg-white object-contain p-3 ring-1 ring-slate-200"
+                      />
+                    ) : null}
+
+                    {selectedPartMediaKind === 'audio_slides' && lessonSlides.length > 0 ? (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {lessonSlides.map((slide) => (
+                          <div
+                            key={slide.id}
+                            className="rounded-2xl bg-white p-3 ring-1 ring-slate-200"
+                          >
+                            <img
+                              src={slide.image_url}
+                              alt={`שקופית ${slide.slide_index + 1}`}
+                              className="h-32 w-full rounded-2xl object-contain"
+                            />
+                            <div className="mt-2 text-xs text-slate-500">
+                              שקופית {slide.slide_index + 1} | {slide.start_second} שניות
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-2xl bg-white p-4 text-sm text-slate-500 ring-1 ring-slate-200">
+                    בחר תת־חלק כדי לצפות כאן באודיו, וידאו או שקופיות.
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                <h3 className="text-lg font-semibold text-slate-900">שליטה על הספרייה</h3>
+                <p className="mt-2 text-sm text-slate-600">
+                  מנהל ראשי יכול להקפיא, לארכב או למחוק את ספריית הפרשה שנבחרה. מלמד רגיל יכול לשלוט רק על הספריות שלו.
+                </p>
+                <div className="mt-4 grid gap-3">
+                  <form action={setTeacherParashaStatus}>
+                    <input type="hidden" name="id" value={selectedTeacherParasha.id} />
+                    <input
+                      type="hidden"
+                      name="status"
+                      value={selectedTeacherParasha.status === 'frozen' ? 'active' : 'frozen'}
+                    />
+                    <input
+                      type="hidden"
+                      name="freeze_reason"
+                      value={selectedTeacherParasha.freeze_reason ?? ''}
+                    />
+                    <button
+                      type="submit"
+                      className="w-full rounded-2xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white"
+                    >
+                      {selectedTeacherParasha.status === 'frozen' ? 'החזרה לפעיל' : 'הקפאת ספרייה'}
+                    </button>
+                  </form>
+                  <form action={setTeacherParashaStatus}>
+                    <input type="hidden" name="id" value={selectedTeacherParasha.id} />
+                    <input
+                      type="hidden"
+                      name="status"
+                      value={selectedTeacherParasha.status === 'archived' ? 'active' : 'archived'}
+                    />
+                    <input
+                      type="hidden"
+                      name="freeze_reason"
+                      value={selectedTeacherParasha.freeze_reason ?? ''}
+                    />
+                    <button
+                      type="submit"
+                      className="w-full rounded-2xl bg-slate-700 px-4 py-3 text-sm font-semibold text-white"
+                    >
+                      {selectedTeacherParasha.status === 'archived' ? 'החזרה מארכיון' : 'העברה לארכיון'}
+                    </button>
+                  </form>
+                  <form action={deleteTeacherParasha}>
+                    <input type="hidden" name="id" value={selectedTeacherParasha.id} />
+                    <button
+                      type="submit"
+                      className="w-full rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white"
+                    >
+                      מחיקת ספריית פרשה
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {selectedTeacherParasha ? (
             <div className="mt-6 grid gap-6 xl:grid-cols-2">
               <div className="rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
                 <h3 className="text-lg font-semibold text-slate-900">
-                  העתקת מבנה לפרשה {selectedParasha.name}
+                  העתקת מבנה לפרשה {selectedTeacherParasha.internal_display_name}
                 </h3>
                 <p className="mt-2 text-sm text-slate-600">
-                  אם מנהל אחר כבר בנה את אותה פרשה, אפשר להעתיק את כל המבנה אליך
-                  באמצעות קוד השיתוף שלו. לאחר ההעתקה, כל שינוי שתעשה יישאר רק
-                  אצלך.
+                  אפשר לייבא את כל המבנה של ספריית מקור או לבחור תת־חלק יחיד בלבד.
+                  המערכת מציגה רק תתי־חלקים שבאמת מוכנים לייבוא: וידאו קיים, או אודיו עם לפחות שקופית אחת.
                 </p>
                 <form action={copyParashaStructure} className="mt-4 grid gap-3">
-                  <input type="hidden" name="parasha_id" value={selectedParasha.id} />
+                  <input type="hidden" name="teacher_parasha_id" value={selectedTeacherParasha.id} />
                   <select
-                    name="source_username"
+                    name="copy_scope"
+                    defaultValue="all"
+                    className="rounded-2xl border border-slate-200 px-4 py-3"
+                  >
+                    <option value="all">ייבוא כל המבנה</option>
+                    <option value="single_part">ייבוא תת־חלק בודד</option>
+                  </select>
+                  <select
+                    name="source_teacher_parasha_id"
                     defaultValue=""
                     className="rounded-2xl border border-slate-200 px-4 py-3"
                   >
-                    <option value="">בחר מנהל מקור</option>
+                    <option value="">בחר פרשת מקור</option>
                     {parashaSources.map((source) => (
-                      <option key={source.adminId} value={source.username}>
-                        {source.displayName}
+                      <option key={source.teacherParashaId} value={source.teacherParashaId}>
+                        {source.internalDisplayName} | {source.displayName}{source.nusachName ? ` | ${source.nusachName}` : ''} | {source.importablePartCount} תתי־חלקים
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    name="source_lesson_part_id"
+                    defaultValue=""
+                    className="rounded-2xl border border-slate-200 px-4 py-3"
+                  >
+                    <option value="">בחירת תת־חלק בודד לייבוא</option>
+                    {allImportableSourceParts.map((part) => (
+                      <option key={`${part.teacherParashaId}-${part.lessonPartId}`} value={part.lessonPartId}>
+                        {part.sourceLabel}
                       </option>
                     ))}
                   </select>
@@ -830,10 +1407,26 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   <div className="mt-4 space-y-3">
                     {parashaSources.map((source) => (
                       <div
-                        key={source.adminId}
+                        key={source.teacherParashaId}
                         className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-700 ring-1 ring-slate-200"
                       >
-                        {source.displayName}
+                        <div className="font-semibold text-slate-900">
+                          {source.internalDisplayName}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {source.displayName}{source.nusachName ? ` | ${source.nusachName}` : ''} | {source.importablePartCount} תתי־חלקים מוכנים
+                        </div>
+                        {source.immediateSourceDisplayName ? (
+                          <div className="mt-1 text-xs text-amber-700">
+                            יובא דרך: {source.displayName} | מקור ישיר קודם: {source.immediateSourceDisplayName}
+                          </div>
+                        ) : null}
+                        {source.rootSourceDisplayName &&
+                        source.rootSourceDisplayName !== source.displayName ? (
+                          <div className="mt-1 text-xs text-slate-500">
+                            מקור ראשון: {source.rootSourceDisplayName}
+                          </div>
+                        ) : null}
                       </div>
                     ))}
                   </div>
@@ -848,7 +1441,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
 
           {!lessonGroup && activeParashaId && activeSectionId ? (
             <form action={ensureLessonGroup} className="mt-6 rounded-3xl bg-slate-50 p-4">
-              <input type="hidden" name="parasha_id" value={activeParashaId} />
+              <input type="hidden" name="teacher_parasha_id" value={activeParashaId} />
               <input type="hidden" name="section_id" value={activeSectionId} />
               <p className="text-sm text-slate-600">
                 עדיין אין `lesson_group` עבור הבחירה הזאת.

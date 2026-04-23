@@ -12,6 +12,30 @@ type Parasha = {
   name: string
 }
 
+type Nusach = {
+  id: number
+  name: string
+}
+
+type TeacherParasha = {
+  id: number
+  owner_admin_id: number
+  parasha_id: number
+  nusach_id: number
+  status: 'draft' | 'active' | 'frozen' | 'archived'
+  variant_number: number
+  freeze_reason?: string | null
+  parashot?: Parasha | Parasha[] | null
+  nusachim?: Nusach | Nusach[] | null
+}
+
+type StudentTeacherParashaAssignment = {
+  id: number
+  teacher_parasha_id: number
+  status: 'active' | 'ended'
+  teacher_parashot: TeacherParasha | TeacherParasha[] | null
+}
+
 export type Student = {
   id: number
   admin_id: number | null
@@ -19,6 +43,8 @@ export type Student = {
   name: string
   parasha_id: number | null
   parashot: Parasha | Parasha[] | null
+  active_teacher_parasha_id?: number | null
+  active_teacher_parasha?: TeacherParasha | null
 }
 
 export type Section = {
@@ -31,6 +57,7 @@ type LessonGroup = {
   id: number
   admin_id: number | null
   parasha_id: number | null
+  teacher_parasha_id?: number | null
   section_id: number
   completion_target?: number | null
 }
@@ -227,6 +254,13 @@ async function getStudentRecording(
 }
 
 function getParashaName(student: Student | null) {
+  if (student?.active_teacher_parasha) {
+    const parashot = student.active_teacher_parasha.parashot
+    if (parashot) {
+      return Array.isArray(parashot) ? parashot[0]?.name ?? null : parashot.name
+    }
+  }
+
   const parashot = student?.parashot
 
   if (!parashot) {
@@ -234,6 +268,130 @@ function getParashaName(student: Student | null) {
   }
 
   return Array.isArray(parashot) ? parashot[0]?.name ?? null : parashot.name
+}
+
+function unwrapSingle<T>(value: T | T[] | null | undefined) {
+  return Array.isArray(value) ? (value[0] ?? null) : (value ?? null)
+}
+
+async function getActiveTeacherParashaAssignment(studentId: number) {
+  const { data, error } = await supabase
+    .from('student_teacher_parasha_assignments')
+    .select(
+      `
+        id,
+        teacher_parasha_id,
+        status,
+        teacher_parashot (
+          id,
+          owner_admin_id,
+          parasha_id,
+          nusach_id,
+          status,
+          variant_number,
+          freeze_reason,
+          parashot (
+            id,
+            name
+          ),
+          nusachim (
+            id,
+            name
+          )
+        )
+      `
+    )
+    .eq('student_id', studentId)
+    .eq('status', 'active')
+    .maybeSingle()
+
+  if (error) {
+    return {
+      assignment: null as StudentTeacherParashaAssignment | null,
+      error,
+    }
+  }
+
+  const assignment = (data ?? null) as StudentTeacherParashaAssignment | null
+
+  if (!assignment) {
+    return {
+      assignment: null as StudentTeacherParashaAssignment | null,
+      error: null,
+    }
+  }
+
+  const teacherParasha = unwrapSingle(assignment.teacher_parashot)
+
+  return {
+    assignment: {
+      ...assignment,
+      teacher_parashot: teacherParasha,
+    } as StudentTeacherParashaAssignment,
+    error: null,
+  }
+}
+
+async function getStudentContext(studentId?: number | null) {
+  const [{ student, error: studentError }, { students, error: studentsError }] =
+    await Promise.all([getActiveStudent(studentId), getStudents()])
+
+  if (studentError || studentsError || !student) {
+    return {
+      student,
+      students,
+      assignment: null as StudentTeacherParashaAssignment | null,
+      teacherParasha: null as TeacherParasha | null,
+      effectiveAdminId: student?.admin_id ?? null,
+      effectiveParashaId: student?.parasha_id ?? null,
+      effectiveTeacherParashaId: null as number | null,
+      parashaName: getParashaName(student),
+      isFrozen: false,
+      error:
+        studentError ?? studentsError ?? new Error('לא נמצא תלמיד פעיל'),
+    }
+  }
+
+  const { assignment, error: assignmentError } =
+    await getActiveTeacherParashaAssignment(student.id)
+
+  if (assignmentError) {
+    return {
+      student,
+      students,
+      assignment: null as StudentTeacherParashaAssignment | null,
+      teacherParasha: null as TeacherParasha | null,
+      effectiveAdminId: student.admin_id,
+      effectiveParashaId: student.parasha_id,
+      effectiveTeacherParashaId: null as number | null,
+      parashaName: getParashaName(student),
+      isFrozen: false,
+      error: assignmentError,
+    }
+  }
+
+  const teacherParasha = unwrapSingle(assignment?.teacher_parashot) as TeacherParasha | null
+  const effectiveAdminId = teacherParasha?.owner_admin_id ?? student.admin_id
+  const effectiveParashaId = teacherParasha?.parasha_id ?? student.parasha_id
+  const effectiveTeacherParashaId = teacherParasha?.id ?? null
+  const nextStudent: Student = {
+    ...student,
+    active_teacher_parasha_id: effectiveTeacherParashaId,
+    active_teacher_parasha: teacherParasha,
+  }
+
+  return {
+    student: nextStudent,
+    students,
+    assignment,
+    teacherParasha,
+    effectiveAdminId,
+    effectiveParashaId,
+    effectiveTeacherParashaId,
+    parashaName: getParashaName(nextStudent),
+    isFrozen: teacherParasha?.status === 'frozen',
+    error: null,
+  }
 }
 
 function parseNumericId(value: string | string[] | undefined) {
@@ -315,35 +473,57 @@ export async function getSections() {
 }
 
 export async function getStudentDashboardData(studentId?: number | null) {
-  const [{ student, error: studentError }, { students, error: studentsError }, { sections, error: sectionsError }] =
-    await Promise.all([getActiveStudent(studentId), getStudents(), getSections()])
+  const [{ sections, error: sectionsError }, studentContext] =
+    await Promise.all([getSections(), getStudentContext(studentId)])
 
-  if (studentError || studentsError || sectionsError || !student) {
+  const {
+    student,
+    students,
+    effectiveAdminId,
+    effectiveParashaId,
+    effectiveTeacherParashaId,
+    parashaName,
+    isFrozen,
+    error: studentContextError,
+  } = studentContext
+
+  if (studentContextError || sectionsError || !student) {
     return {
       student,
       students,
       sections: [] as SectionProgress[],
-      parashaName: getParashaName(student),
+      parashaName,
       error:
-        studentError ??
-        studentsError ??
+        studentContextError ??
         sectionsError ??
         new Error('לא נמצא תלמיד פעיל'),
     }
   }
 
-  const { data: lessonGroups, error: lessonGroupsError } = await supabase
-    .from('lesson_groups')
-    .select('*')
-    .eq('admin_id', student.admin_id ?? -1)
-    .eq('parasha_id', student.parasha_id ?? -1)
+  if (isFrozen) {
+    return {
+      student,
+      students,
+      sections: [] as SectionProgress[],
+      parashaName,
+      error: null,
+    }
+  }
+
+  const lessonGroupsQuery = supabase.from('lesson_groups').select('*')
+  const { data: lessonGroups, error: lessonGroupsError } =
+    effectiveTeacherParashaId
+      ? await lessonGroupsQuery.eq('teacher_parasha_id', effectiveTeacherParashaId)
+      : await lessonGroupsQuery
+          .eq('admin_id', effectiveAdminId ?? -1)
+          .eq('parasha_id', effectiveParashaId ?? -1)
 
   if (lessonGroupsError) {
     return {
       student,
       students,
       sections: [] as SectionProgress[],
-      parashaName: getParashaName(student),
+      parashaName,
       error: lessonGroupsError,
     }
   }
@@ -363,7 +543,7 @@ export async function getStudentDashboardData(studentId?: number | null) {
       student,
       students,
       sections: [] as SectionProgress[],
-      parashaName: getParashaName(student),
+      parashaName,
       error: lessonPartsError,
     }
   }
@@ -378,7 +558,7 @@ export async function getStudentDashboardData(studentId?: number | null) {
       student,
       students,
       sections: [] as SectionProgress[],
-      parashaName: getParashaName(student),
+      parashaName,
       error: slideCountError,
     }
   }
@@ -391,7 +571,7 @@ export async function getStudentDashboardData(studentId?: number | null) {
       student,
       students,
       sections: [] as SectionProgress[],
-      parashaName: getParashaName(student),
+      parashaName,
       error: visibilityError,
     }
   }
@@ -488,10 +668,10 @@ export async function getStudentDashboardData(studentId?: number | null) {
     .filter((section) => section.totalParts > 0)
 
   return {
-    student,
-    students,
-    sections: sectionProgress,
-    parashaName: getParashaName(student),
+      student,
+      students,
+      sections: sectionProgress,
+    parashaName,
     error: null,
   }
 }
@@ -500,18 +680,37 @@ export async function getSectionPageData(
   sectionId: number,
   studentId?: number | null
 ) {
-  const [{ student, error: studentError }, { students, error: studentsError }] =
-    await Promise.all([getActiveStudent(studentId), getStudents()])
+  const {
+    student,
+    students,
+    effectiveAdminId,
+    effectiveParashaId,
+    effectiveTeacherParashaId,
+    parashaName,
+    isFrozen,
+    error: studentContextError,
+  } = await getStudentContext(studentId)
 
-  if (studentError || studentsError || !student) {
+  if (studentContextError || !student) {
     return {
       student,
       students,
       section: null,
       parts: [] as PartProgress[],
-      parashaName: getParashaName(student),
+      parashaName,
       error:
-        studentError ?? studentsError ?? new Error('לא נמצא תלמיד פעיל'),
+        studentContextError ?? new Error('לא נמצא תלמיד פעיל'),
+    }
+  }
+
+  if (isFrozen) {
+    return {
+      student,
+      students,
+      section: null,
+      parts: [] as PartProgress[],
+      parashaName,
+      error: null,
     }
   }
 
@@ -527,18 +726,23 @@ export async function getSectionPageData(
       students,
       section: null,
       parts: [] as PartProgress[],
-      parashaName: getParashaName(student),
+      parashaName,
       error: sectionError ?? new Error('החלק לא נמצא'),
     }
   }
 
-  const { data: lessonGroup, error: lessonGroupError } = await supabase
+  const lessonGroupQuery = supabase
     .from('lesson_groups')
     .select('*')
-    .eq('admin_id', student.admin_id ?? -1)
-    .eq('parasha_id', student.parasha_id ?? -1)
     .eq('section_id', sectionId)
-    .maybeSingle()
+
+  const { data: lessonGroup, error: lessonGroupError } =
+    effectiveTeacherParashaId
+      ? await lessonGroupQuery.eq('teacher_parasha_id', effectiveTeacherParashaId).maybeSingle()
+      : await lessonGroupQuery
+          .eq('admin_id', effectiveAdminId ?? -1)
+          .eq('parasha_id', effectiveParashaId ?? -1)
+          .maybeSingle()
 
   if (lessonGroupError) {
     return {
@@ -546,7 +750,7 @@ export async function getSectionPageData(
       students,
       section: section as Section,
       parts: [] as PartProgress[],
-      parashaName: getParashaName(student),
+      parashaName,
       error: lessonGroupError,
     }
   }
@@ -557,7 +761,7 @@ export async function getSectionPageData(
       students,
       section: section as Section,
       parts: [] as PartProgress[],
-      parashaName: getParashaName(student),
+      parashaName,
       error: null,
     }
   }
@@ -574,7 +778,7 @@ export async function getSectionPageData(
       students,
       section: section as Section,
       parts: [] as PartProgress[],
-      parashaName: getParashaName(student),
+      parashaName,
       error: lessonPartsError,
     }
   }
@@ -590,7 +794,7 @@ export async function getSectionPageData(
       students,
       section: section as Section,
       parts: [] as PartProgress[],
-      parashaName: getParashaName(student),
+      parashaName,
       error: slideCountError,
     }
   }
@@ -604,7 +808,7 @@ export async function getSectionPageData(
       students,
       section: section as Section,
       parts: [] as PartProgress[],
-      parashaName: getParashaName(student),
+      parashaName,
       error: visibilityError,
     }
   }
@@ -638,7 +842,7 @@ export async function getSectionPageData(
       students,
       section: section as Section,
       parts: [] as PartProgress[],
-      parashaName: getParashaName(student),
+      parashaName,
       error: practiceError,
     }
   }
@@ -670,7 +874,7 @@ export async function getSectionPageData(
         mediaUrl: getLessonMediaUrl(part),
       }
     }),
-    parashaName: getParashaName(student),
+    parashaName,
     error: null,
   }
 }
@@ -679,10 +883,18 @@ export async function getLessonPageData(
   partId: number,
   studentId?: number | null
 ) {
-  const [{ student, error: studentError }, { students, error: studentsError }] =
-    await Promise.all([getActiveStudent(studentId), getStudents()])
+  const {
+    student,
+    students,
+    effectiveAdminId,
+    effectiveParashaId,
+    effectiveTeacherParashaId,
+    parashaName,
+    isFrozen,
+    error: studentContextError,
+  } = await getStudentContext(studentId)
 
-  if (studentError || studentsError || !student) {
+  if (studentContextError || !student) {
     return {
       student,
       students,
@@ -693,9 +905,25 @@ export async function getLessonPageData(
       practiceEvents: [] as PracticeEvent[],
       studentRecording: null as StudentRecording | null,
       navigation: { previous: null, next: null } as LessonNavigation,
-      parashaName: getParashaName(student),
+      parashaName,
       error:
-        studentError ?? studentsError ?? new Error('לא נמצא תלמיד פעיל'),
+        studentContextError ?? new Error('לא נמצא תלמיד פעיל'),
+    }
+  }
+
+  if (isFrozen) {
+    return {
+      student,
+      students,
+      lessonPart: null,
+      lessonGroup: null,
+      section: null,
+      slides: [] as LessonSlide[],
+      practiceEvents: [] as PracticeEvent[],
+      studentRecording: null as StudentRecording | null,
+      navigation: { previous: null, next: null } as LessonNavigation,
+      parashaName,
+      error: new Error('הפרשה של התלמיד קפואה כרגע ולא זמינה לצפייה.'),
     }
   }
 
@@ -716,7 +944,7 @@ export async function getLessonPageData(
       practiceEvents: [] as PracticeEvent[],
       studentRecording: null as StudentRecording | null,
       navigation: { previous: null, next: null } as LessonNavigation,
-      parashaName: getParashaName(student),
+      parashaName,
       error: lessonPartError ?? new Error('לא נמצא תת-חלק'),
     }
   }
@@ -738,15 +966,17 @@ export async function getLessonPageData(
       practiceEvents: [] as PracticeEvent[],
       studentRecording: null as StudentRecording | null,
       navigation: { previous: null, next: null } as LessonNavigation,
-      parashaName: getParashaName(student),
+      parashaName,
       error: lessonGroupError ?? new Error('לא נמצאה קבוצת שיעור'),
     }
   }
 
-  if (
-    lessonGroup.parasha_id !== student.parasha_id ||
-    lessonGroup.admin_id !== student.admin_id
-  ) {
+  const belongsToStudent = effectiveTeacherParashaId
+    ? lessonGroup.teacher_parasha_id === effectiveTeacherParashaId
+    : lessonGroup.parasha_id === effectiveParashaId &&
+      lessonGroup.admin_id === effectiveAdminId
+
+  if (!belongsToStudent) {
     return {
       student,
       students,
@@ -757,7 +987,7 @@ export async function getLessonPageData(
       practiceEvents: [] as PracticeEvent[],
       studentRecording: null as StudentRecording | null,
       navigation: { previous: null, next: null } as LessonNavigation,
-      parashaName: getParashaName(student),
+      parashaName,
       error: new Error('השיעור לא שייך לתוכן של התלמיד'),
     }
   }
@@ -789,8 +1019,14 @@ export async function getLessonPageData(
       supabase
         .from('lesson_groups')
         .select('id, section_id, sections ( order_index )')
-        .eq('admin_id', student.admin_id ?? -1)
-        .eq('parasha_id', student.parasha_id ?? -1),
+        .match(
+          effectiveTeacherParashaId
+            ? { teacher_parasha_id: effectiveTeacherParashaId }
+            : {
+                admin_id: effectiveAdminId ?? -1,
+                parasha_id: effectiveParashaId ?? -1,
+              }
+        ),
       getStudentRecording(student.id, lessonPart.id),
     ])
 
@@ -805,7 +1041,7 @@ export async function getLessonPageData(
       practiceEvents: (practiceEvents ?? []) as PracticeEvent[],
       studentRecording,
       navigation: { previous: null, next: null } as LessonNavigation,
-      parashaName: getParashaName(student),
+      parashaName,
       error: allGroupsError,
     }
   }
@@ -835,7 +1071,7 @@ export async function getLessonPageData(
       practiceEvents: (practiceEvents ?? []) as PracticeEvent[],
       studentRecording,
       navigation: { previous: null, next: null } as LessonNavigation,
-      parashaName: getParashaName(student),
+      parashaName,
       error: navigationPartsError,
     }
   }
@@ -856,7 +1092,7 @@ export async function getLessonPageData(
       practiceEvents: (practiceEvents ?? []) as PracticeEvent[],
       studentRecording,
       navigation: { previous: null, next: null } as LessonNavigation,
-      parashaName: getParashaName(student),
+      parashaName,
       error: navigationSlidesError,
     }
   }
@@ -875,7 +1111,7 @@ export async function getLessonPageData(
       practiceEvents: (practiceEvents ?? []) as PracticeEvent[],
       studentRecording,
       navigation: { previous: null, next: null } as LessonNavigation,
-      parashaName: getParashaName(student),
+      parashaName,
       error: navigationVisibilityError,
     }
   }
@@ -943,7 +1179,7 @@ export async function getLessonPageData(
     practiceEvents: (practiceEvents ?? []) as PracticeEvent[],
     studentRecording,
     navigation,
-    parashaName: getParashaName(student),
+    parashaName,
     error: !isLessonPartReady(
       {
         ...(lessonPart as LessonPart),

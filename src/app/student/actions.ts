@@ -12,6 +12,7 @@ export async function recordPracticeEvent(input: {
   completed: boolean
 }) {
   const session = await requireStudentSession()
+  await getStudentLessonPartForRecording(session.id, input.lessonPartId)
   const { event, error } = await createPracticeEvent({
     studentId: session.id,
     lessonPartId: input.lessonPartId,
@@ -40,7 +41,8 @@ async function getStudentLessonPartForRecording(studentId: number, lessonPartId:
         lesson_groups (
           id,
           admin_id,
-          parasha_id
+          parasha_id,
+          teacher_parasha_id
         )
       `
     )
@@ -55,12 +57,43 @@ async function getStudentLessonPartForRecording(studentId: number, lessonPartId:
     ? lessonPart.lesson_groups[0]
     : lessonPart.lesson_groups
 
-  if (
-    !lessonGroup ||
-    lessonGroup.admin_id !== session.adminId ||
-    lessonGroup.parasha_id !== session.parashaId
-  ) {
+  const { data: activeAssignment, error: assignmentError } = await supabase
+    .from('student_teacher_parasha_assignments')
+    .select(
+      `
+        teacher_parasha_id,
+        teacher_parashot (
+          id,
+          owner_admin_id,
+          parasha_id,
+          status
+        )
+      `
+    )
+    .eq('student_id', session.id)
+    .eq('status', 'active')
+    .maybeSingle()
+
+  if (assignmentError) {
+    throw new Error(assignmentError.message)
+  }
+
+  const teacherParasha = Array.isArray(activeAssignment?.teacher_parashot)
+    ? activeAssignment.teacher_parashot[0]
+    : activeAssignment?.teacher_parashot
+
+  const belongsToStudent = teacherParasha
+    ? lessonGroup?.teacher_parasha_id === teacherParasha.id
+    : lessonGroup &&
+      lessonGroup.admin_id === session.adminId &&
+      lessonGroup.parasha_id === session.parashaId
+
+  if (!lessonGroup || !belongsToStudent) {
     throw new Error('תת־החלק לא שייך למסלול של התלמיד.')
+  }
+
+  if (teacherParasha?.status === 'frozen') {
+    throw new Error('הפרשה של התלמיד קפואה כרגע, ולכן אי אפשר להקליט לקטעים שלה.')
   }
 
   const { data: slideRows, error: slidesError } = await supabase

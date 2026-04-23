@@ -1,13 +1,20 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useMemo, useTransition } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import type { AdminParasha, AdminSection } from '@/lib/admin-data'
+import type { AdminSection, AdminTeacherParasha } from '@/lib/admin-data'
 import type { LessonPart } from '@/lib/practice-data'
 
+type SectionContentSummary = {
+  sectionId: number
+  partCount: number
+  hasContent: boolean
+}
+
 type AdminContentSelectorProps = {
-  parashot: AdminParasha[]
+  teacherParashot: AdminTeacherParasha[]
   sections: AdminSection[]
+  sectionSummaries: SectionContentSummary[]
   lessonParts: LessonPart[]
   selectedParashaId: number | null
   selectedSectionId: number | null
@@ -15,8 +22,9 @@ type AdminContentSelectorProps = {
 }
 
 export function AdminContentSelector({
-  parashot,
+  teacherParashot,
   sections,
+  sectionSummaries,
   lessonParts,
   selectedParashaId,
   selectedSectionId,
@@ -25,29 +33,40 @@ export function AdminContentSelector({
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  const [isPending, startTransition] = useTransition()
+  const [, startTransition] = useTransition()
+  const parashaId = selectedParashaId?.toString() ?? ''
+  const sectionId = selectedSectionId?.toString() ?? ''
+  const partId = selectedPartId?.toString() ?? ''
 
-  const [parashaId, setParashaId] = useState(selectedParashaId?.toString() ?? '')
-  const [sectionId, setSectionId] = useState(selectedSectionId?.toString() ?? '')
-  const [partId, setPartId] = useState(selectedPartId?.toString() ?? '')
+  const sectionSummaryById = useMemo(
+    () => new Map(sectionSummaries.map((summary) => [summary.sectionId, summary])),
+    [sectionSummaries]
+  )
 
-  function handleLoad() {
+  function navigate(next: {
+    parashaId?: string
+    sectionId?: string
+    partId?: string
+  }) {
     const nextParams = new URLSearchParams(searchParams.toString())
+    const nextParashaId = next.parashaId ?? parashaId
+    const nextSectionId = next.sectionId ?? sectionId
+    const nextPartId = next.partId ?? partId
 
-    if (parashaId) {
-      nextParams.set('parashaId', parashaId)
+    if (nextParashaId) {
+      nextParams.set('parashaId', nextParashaId)
     } else {
       nextParams.delete('parashaId')
     }
 
-    if (sectionId) {
-      nextParams.set('sectionId', sectionId)
+    if (nextSectionId) {
+      nextParams.set('sectionId', nextSectionId)
     } else {
       nextParams.delete('sectionId')
     }
 
-    if (partId) {
-      nextParams.set('partId', partId)
+    if (nextPartId) {
+      nextParams.set('partId', nextPartId)
     } else {
       nextParams.delete('partId')
     }
@@ -60,34 +79,53 @@ export function AdminContentSelector({
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-4">
+    <div className="grid gap-4 md:grid-cols-3">
       <select
         value={parashaId}
-        onChange={(event) => setParashaId(event.target.value)}
+        onChange={(event) => {
+          const nextParashaId = event.target.value
+          navigate({ parashaId: nextParashaId, partId: '' })
+        }}
         className="rounded-2xl border border-slate-200 px-4 py-3"
       >
-        {parashot.map((parasha) => (
+        {teacherParashot.length === 0 ? <option value="">אין ספריות זמינות</option> : null}
+        {teacherParashot.map((parasha) => (
           <option key={parasha.id} value={parasha.id}>
-            {parasha.name}
+            {parasha.internal_display_name} | {parasha.owner_display_name} | {parasha.nusach_name}
           </option>
         ))}
       </select>
 
       <select
         value={sectionId}
-        onChange={(event) => setSectionId(event.target.value)}
+        onChange={(event) => {
+          const nextSectionId = event.target.value
+          navigate({ sectionId: nextSectionId, partId: '' })
+        }}
         className="rounded-2xl border border-slate-200 px-4 py-3"
       >
         {sections.map((section) => (
           <option key={section.id} value={section.id}>
-            {section.name}
+            {(() => {
+              const summary = sectionSummaryById.get(section.id)
+              if (!summary) {
+                return `${section.name} (0)`
+              }
+
+              return summary.hasContent
+                ? `${section.name} *`
+                : `${section.name} (${summary.partCount})`
+            })()}
           </option>
         ))}
       </select>
 
       <select
         value={partId}
-        onChange={(event) => setPartId(event.target.value)}
+        onChange={(event) => {
+          const nextPartId = event.target.value
+          navigate({ partId: nextPartId })
+        }}
         className="rounded-2xl border border-slate-200 px-4 py-3"
       >
         <option value="">בחירת תת־חלק</option>
@@ -97,15 +135,6 @@ export function AdminContentSelector({
           </option>
         ))}
       </select>
-
-      <button
-        type="button"
-        onClick={handleLoad}
-        disabled={isPending}
-        className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
-      >
-        {isPending ? 'טוען...' : 'טעינת תוכן'}
-      </button>
     </div>
   )
 }

@@ -1,5 +1,6 @@
 'use client'
 
+import type { ReactNode } from 'react'
 import { useMemo, useTransition } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import type { AdminSection, AdminTeacherParasha } from '@/lib/admin-data'
@@ -19,6 +20,54 @@ type AdminContentSelectorProps = {
   selectedParashaId: number | null
   selectedSectionId: number | null
   selectedPartId: number | null
+}
+
+type AdminQueryFormProps = {
+  children: ReactNode
+  className?: string
+  hash?: string
+}
+
+export function AdminQueryForm({
+  children,
+  className,
+  hash,
+}: AdminQueryFormProps) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const [, startTransition] = useTransition()
+
+  return (
+    <form
+      className={className}
+      onSubmit={(event) => {
+        event.preventDefault()
+
+        const formData = new FormData(event.currentTarget)
+        const nextParams = new URLSearchParams(searchParams.toString())
+
+        for (const [key, value] of formData.entries()) {
+          const normalizedValue = typeof value === 'string' ? value.trim() : ''
+
+          if (normalizedValue) {
+            nextParams.set(key, normalizedValue)
+          } else {
+            nextParams.delete(key)
+          }
+        }
+
+        startTransition(() => {
+          router.replace(
+            `${pathname}?${nextParams.toString()}${hash ? `#${hash}` : ''}`,
+            { scroll: false }
+          )
+        })
+      }}
+    >
+      {children}
+    </form>
+  )
 }
 
 export function AdminContentSelector({

@@ -28,7 +28,7 @@ import {
   upsertTeacherParasha,
 } from './actions'
 import { AudioDuration } from './audio-duration'
-import { AdminContentSelector } from './selectors'
+import { AdminContentSelector, AdminQueryForm } from './selectors'
 
 type SectionContentSummary = {
   sectionId: number
@@ -256,6 +256,60 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     }
   }
 
+  let contentParashaCount = 0
+  let contentSectionCount = 0
+
+  if (allTeacherParashot.length > 0) {
+    const { data: visibleGroups } = await supabase
+      .from('lesson_groups')
+      .select('id, teacher_parasha_id, section_id')
+      .in(
+        'teacher_parasha_id',
+        allTeacherParashot.map((teacherParasha) => teacherParasha.id)
+      )
+
+    const allGroups = (visibleGroups ?? []) as Array<{
+      id: number
+      teacher_parasha_id: number
+      section_id: number
+    }>
+
+    if (allGroups.length > 0) {
+      const { data: visibleParts } = await supabase
+        .from('lesson_parts')
+        .select('lesson_group_id')
+        .in(
+          'lesson_group_id',
+          allGroups.map((group) => group.id)
+        )
+
+      const groupIdsWithParts = new Set(
+        ((visibleParts ?? []) as Array<{ lesson_group_id: number }>).map(
+          (part) => part.lesson_group_id
+        )
+      )
+
+      const teacherParashaIdsWithParts = new Set<number>()
+      const sectionIdsWithParts = new Set<number>()
+
+      for (const group of allGroups) {
+        if (!groupIdsWithParts.has(group.id)) {
+          continue
+        }
+
+        teacherParashaIdsWithParts.add(group.teacher_parasha_id)
+        sectionIdsWithParts.add(group.section_id)
+      }
+
+      contentParashaCount = new Set(
+        allTeacherParashot
+          .filter((teacherParasha) => teacherParashaIdsWithParts.has(teacherParasha.id))
+          .map((teacherParasha) => teacherParasha.parasha_id)
+      ).size
+      contentSectionCount = sectionIdsWithParts.size
+    }
+  }
+
   return (
     <main className="min-h-screen bg-slate-50 p-4 sm:p-6">
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
@@ -296,14 +350,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           </div>
         ) : null}
 
-        <div className="order-3 grid gap-4 md:grid-cols-4">
+        <div className="order-4 grid gap-4 md:grid-cols-4">
           <div className="rounded-3xl bg-white p-5 ring-1 ring-slate-200">
             <p className="text-sm text-slate-500">פרשות</p>
-            <p className="mt-2 text-3xl font-black text-slate-900">{parashot.length}</p>
+            <p className="mt-2 text-3xl font-black text-slate-900">{contentParashaCount}</p>
           </div>
           <div className="rounded-3xl bg-white p-5 ring-1 ring-slate-200">
             <p className="text-sm text-slate-500">חלקים ראשיים</p>
-            <p className="mt-2 text-3xl font-black text-slate-900">{sections.length}</p>
+            <p className="mt-2 text-3xl font-black text-slate-900">{contentSectionCount}</p>
           </div>
           <div className="rounded-3xl bg-white p-5 ring-1 ring-slate-200">
             <p className="text-sm text-slate-500">תלמידים נראים</p>
@@ -315,6 +369,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           </div>
         </div>
 
+        <div className="order-3">
         <DisclosureSection
           title="מעקב תרגולים והשלמות"
           description="בחר תלמיד כדי לראות עבור כל תת־חלק כמה פעמים תרגל, כמה השלמות נרשמו, והאם הקטע זמין לתלמיד."
@@ -323,7 +378,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             <div />
           </div>
 
-          <form className="mt-6 grid gap-3 md:grid-cols-[1fr_auto]">
+          <AdminQueryForm className="mt-6 grid gap-3 md:grid-cols-[1fr_auto]">
             <input
               type="hidden"
               name="parashaId"
@@ -357,7 +412,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             >
               הצגת מעקב
             </button>
-          </form>
+          </AdminQueryForm>
 
           {trackingSummary ? (
             <div className="mt-6 overflow-x-auto rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
@@ -544,49 +599,15 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             </div>
           ) : null}
         </DisclosureSection>
-
-        <section className="order-[3] rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200">
-          <div className="grid gap-6 xl:grid-cols-2">
-            <form action={updateMyShareCode} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900">קוד שיתוף למבנה פרשה</h2>
-                <p className="mt-2 text-sm text-slate-600">
-                  קוד זה מאפשר למנהל אחר להעתיק אל עצמו מבנה של פרשה שלך, בלי
-                  לחבר בין הנתונים אחר כך.
-                </p>
-              </div>
-              <input
-                name="share_code"
-                type="password"
-                placeholder="קוד שיתוף חדש או מעודכן"
-                className="rounded-2xl border border-slate-200 px-4 py-3"
-              />
-              <button
-                type="submit"
-                className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
-              >
-                שמירת קוד שיתוף
-              </button>
-            </form>
-
-            <div className="rounded-3xl bg-slate-50 p-4">
-              <h2 className="text-xl font-bold text-slate-900">בידוד בין מנהלים</h2>
-              <p className="mt-2 text-sm leading-7 text-slate-600">
-                המערכת עובדת עכשיו כך שכל מנהל רואה רק את תלמידיו, ולכל מנהל
-                יש מבנה פרשה פרטי משלו. גם אם שני מנהלים עובדים על אותה פרשה,
-                כל אחד יכול לשנות חלקים, אודיו ושקופיות בלי להשפיע על השני.
-              </p>
-            </div>
-          </div>
-        </section>
+        </div>
 
         {session.role === 'primary' ? (
-          <div className="order-6">
+          <div className="order-8">
             <DisclosureSection
               title="ניהול מנהלים"
               description="מנהל ראשי יכול להוסיף מנהלים, לשנות תפקיד, ולעדכן פרטי כניסה. כברירת מחדל מוצג מנהל אחד בלבד."
             >
-              <form className="grid gap-3 rounded-3xl bg-slate-50 p-4 md:grid-cols-[12rem_1fr_auto]">
+              <AdminQueryForm className="grid gap-3 rounded-3xl bg-slate-50 p-4 md:grid-cols-[12rem_1fr_auto]">
                 <select
                   name="adminView"
                   defaultValue={selectedAdminView}
@@ -613,7 +634,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 >
                   סינון
                 </button>
-              </form>
+              </AdminQueryForm>
               <div className="mt-6 grid gap-6 xl:grid-cols-2">
                 <div className="space-y-4">
                   {visibleAdmins.length > 0 ? visibleAdmins.map((admin) => (
@@ -753,7 +774,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               </div>
             </div>
 
-            <form className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_1fr_1fr_1.4fr_auto]">
+            <AdminQueryForm className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_1fr_1fr_1.4fr_auto]">
               {activeParashaId ? <input type="hidden" name="parashaId" value={activeParashaId} /> : null}
               {activeSectionId ? <input type="hidden" name="sectionId" value={activeSectionId} /> : null}
               {activePartId ? <input type="hidden" name="partId" value={activePartId} /> : null}
@@ -835,7 +856,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               >
                 סינון ספריות
               </button>
-            </form>
+            </AdminQueryForm>
 
             <div className="mt-5 space-y-4">
               {visibleTeacherParashot.length > 0 ? (
@@ -986,7 +1007,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           title="תלמידי המנהל"
           description="כאן עורכים את התלמידים דרך סינון רגוע יותר: תלמיד אחד או הכול."
         >
-            <form className="grid gap-3 rounded-3xl bg-slate-50 p-4 md:grid-cols-[12rem_1fr_auto]">
+            <AdminQueryForm className="grid gap-3 rounded-3xl bg-slate-50 p-4 md:grid-cols-[12rem_1fr_auto]">
               <select
                 name="studentView"
                 defaultValue={selectedStudentView}
@@ -1013,7 +1034,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               >
                 סינון
               </button>
-            </form>
+            </AdminQueryForm>
               <div className="mt-5 space-y-4">
                 {visibleStudents.length > 0 ? visibleStudents.map((student) => (
                   <form key={student.id} action={upsertStudent} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
@@ -1110,7 +1131,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           </DisclosureSection>
         </div>
 
-        <div className="order-[5] grid items-start gap-6 xl:grid-cols-[1fr_1fr]">
+        <div className="order-[9] grid items-start gap-6 xl:grid-cols-[1fr_1fr]">
           <DisclosureSection
             title="פרשות"
             description="כאן מוסיפים פרשה חדשה בלבד. אם השם כבר קיים, המערכת תציג הודעה מתאימה."
@@ -1160,7 +1181,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
 
         <section
           id="content-editor"
-          className="order-4 rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200"
+          className="order-5 rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200"
         >
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
@@ -1938,6 +1959,29 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               </div>
             </div>
           ) : null}
+        </section>
+
+        <section className="order-10 rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200">
+          <form action={updateMyShareCode} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">קוד שיתוף למבנה פרשה</h2>
+              <p className="mt-2 text-sm text-slate-600">
+                קוד זה מאפשר למנהל אחר להעתיק אל עצמו מבנה של פרשה שלך, בלי לחבר בין הנתונים אחר כך.
+              </p>
+            </div>
+            <input
+              name="share_code"
+              type="password"
+              placeholder="קוד שיתוף חדש או מעודכן"
+              className="rounded-2xl border border-slate-200 px-4 py-3"
+            />
+            <button
+              type="submit"
+              className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
+            >
+              שמירת קוד שיתוף
+            </button>
+          </form>
         </section>
       </div>
     </main>

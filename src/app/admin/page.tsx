@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { redirect } from 'next/navigation'
 import { getAdminDashboardData } from '@/lib/admin-data'
 import { getAdminSession } from '@/lib/admin-auth'
+import { createTorahBuilderLaunchUrl } from '@/lib/torah-builder-handoff'
 import { getLessonMediaKindLabel } from '@/lib/lesson-media'
 import { supabase } from '@/lib/supabase'
 import {
@@ -173,6 +174,29 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
       ? 'video'
       : 'audio_slides'
   const selectedPartPrimarySlide = lessonSlides[0] ?? null
+  const currentAdminQuery = new URLSearchParams()
+  if (activeParashaId) currentAdminQuery.set('parashaId', String(activeParashaId))
+  if (activeSectionId) currentAdminQuery.set('sectionId', String(activeSectionId))
+  if (activePartId) currentAdminQuery.set('partId', String(activePartId))
+  const adminReturnPath = currentAdminQuery.size > 0 ? `/admin?${currentAdminQuery.toString()}` : '/admin'
+  const ownerUserId = session.id ? `admin:${session.id}` : `admin-env:${session.username}`
+  const mainSiteUrl = process.env.MAIN_SITE_URL
+  const builderCallbackUrl = mainSiteUrl
+    ? `${mainSiteUrl.replace(/\/$/, '')}/api/torah-builder/attach`
+    : undefined
+  const builderLaunchUrl =
+    selectedTeacherParasha && selectedPart
+      ? createTorahBuilderLaunchUrl({
+          ownerUserId,
+          teacherName: session.displayName,
+          sourceApp: 'bar-mitzvah-learning',
+          returnUrl: adminReturnPath,
+          callbackUrl: builderCallbackUrl,
+          lessonId: String(selectedPart.id),
+          parashaId: String(selectedTeacherParasha.id),
+          exp: Math.floor(Date.now() / 1000) + 60 * 10,
+        })
+      : null
   const unassignedStudents = students.filter(
     (student) => !managerByStudentId[student.id]
   ).length
@@ -1793,6 +1817,25 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                           loadingLabel={selectedPartMediaKind === 'video' ? 'טוען משך וידאו...' : 'טוען משך אודיו...'}
                         />
                       </div>
+                      {builderLaunchUrl ? (
+                        <div className="rounded-2xl bg-blue-50 p-4 text-sm text-blue-900 ring-1 ring-blue-200">
+                          <p className="font-semibold">יצירה מתקדמת ב-Torah Builder</p>
+                          <p className="mt-2 leading-7">
+                            פותח את אתר ה-builder עם זיהוי המלמד והקשר של הקטע הנבחר, כדי ליצור תמונת טקסט,
+                            להקליט או להעלות אודיו, ולחזור אחר כך עם וידאו מוכן.
+                          </p>
+                          <div className="mt-4">
+                            <Link
+                              href={builderLaunchUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
+                            >
+                              פתיחה ב-Torah Builder
+                            </Link>
+                          </div>
+                        </div>
+                      ) : null}
                       {selectedPartMediaKind === 'video' && selectedPart?.video_url ? (
                         <video controls className="w-full rounded-2xl" src={selectedPart.video_url} />
                       ) : selectedPart?.audio_url ? (

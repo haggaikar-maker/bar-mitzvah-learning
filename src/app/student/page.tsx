@@ -3,6 +3,7 @@ import { logoutUser } from '../auth-actions'
 import {
   getStudentDashboardData,
 } from '@/lib/practice-data'
+import { getReadingCountdownLabel } from '@/lib/student-schedule'
 import { requireStudentSession } from '@/lib/student-auth'
 import { PendingSubmitButton } from '../../components/pending-submit-button'
 import { StudentNavLink } from '../../components/student-nav-link'
@@ -49,6 +50,7 @@ export default async function StudentPage() {
           Math.round((totalCompletionEvents / totalCompletionTarget) * 100)
         )
       : 0
+  const readingCountdown = getReadingCountdownLabel(student.torah_reading_date)
 
   return (
     <main className="student-app">
@@ -64,6 +66,11 @@ export default async function StudentPage() {
             <div className="student-glass-card min-w-[240px] p-4 text-[var(--student-ink)]">
               <p className="text-xs font-semibold text-slate-500">פרשה פעילה</p>
               <h2 className="mt-2 text-2xl font-black">{parashaName ?? 'לא הוגדרה פרשה'}</h2>
+              {readingCountdown ? (
+                <p className="mt-2 text-xs font-semibold text-slate-600">
+                  {readingCountdown}
+                </p>
+              ) : null}
               <div className="mt-4 student-progress-track">
                 <div
                   className="student-progress-fill"

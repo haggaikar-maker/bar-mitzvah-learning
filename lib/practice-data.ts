@@ -41,6 +41,8 @@ export type Student = {
   admin_id: number | null
   username: string | null
   name: string
+  birth_date?: string | null
+  torah_reading_date?: string | null
   parasha_id: number | null
   parashot: Parasha | Parasha[] | null
   active_teacher_parasha_id?: number | null
@@ -416,6 +418,8 @@ export async function getStudents() {
         admin_id,
         username,
         name,
+        birth_date,
+        torah_reading_date,
         parasha_id,
         parashot (
           id,
@@ -438,6 +442,8 @@ export async function getActiveStudent(studentId?: number | null) {
       admin_id,
       username,
       name,
+      birth_date,
+      torah_reading_date,
       parasha_id,
       parashot (
         id,

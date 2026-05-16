@@ -308,6 +308,8 @@ export async function upsertStudent(formData: FormData) {
   const name = readString(formData, 'name')
   const username = readString(formData, 'username')
   const password = readString(formData, 'password')
+  const birthDate = readString(formData, 'birth_date')
+  const torahReadingDate = readString(formData, 'torah_reading_date')
   const teacherParashaId = readNumber(formData, 'teacher_parasha_id')
   const managerId = readNumber(formData, 'manager_id')
 
@@ -352,12 +354,16 @@ export async function upsertStudent(formData: FormData) {
   const payload: {
     name: string
     username: string
+    birth_date: string | null
+    torah_reading_date: string | null
     parasha_id: number | null
     admin_id: number | null
     password_hash?: string
   } = {
     name,
     username,
+    birth_date: birthDate || null,
+    torah_reading_date: torahReadingDate || null,
     parasha_id: resolvedParashaId,
     admin_id: validAdminId,
   }

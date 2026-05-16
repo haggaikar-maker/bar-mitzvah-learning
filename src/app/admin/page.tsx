@@ -5,6 +5,11 @@ import { getAdminDashboardData } from '@/lib/admin-data'
 import { getAdminSession } from '@/lib/admin-auth'
 import { createTorahBuilderLaunchUrl } from '@/lib/torah-builder-handoff'
 import { getLessonMediaKindLabel } from '@/lib/lesson-media'
+import {
+  formatGregorianDate,
+  getDaysUntilReading,
+  getReadingCountdownLabel,
+} from '@/lib/student-schedule'
 import { supabase } from '@/lib/supabase'
 import {
   copyParashaStructure,
@@ -79,6 +84,10 @@ function getTeacherParashaStatusClass(status: string) {
     default:
       return 'bg-slate-100 text-slate-700'
   }
+}
+
+function getBuilderExpiryTimestamp() {
+  return Math.floor(Date.now() / 1000) + 60 * 10
 }
 
 function DisclosureSection({
@@ -194,7 +203,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           callbackUrl: builderCallbackUrl,
           lessonId: String(selectedPart.id),
           parashaId: String(selectedTeacherParasha.id),
-          exp: Math.floor(Date.now() / 1000) + 60 * 10,
+          exp: getBuilderExpiryTimestamp(),
         })
       : null
   const unassignedStudents = students.filter(
@@ -222,6 +231,15 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
       : selectedAdminCard
         ? admins.filter((admin) => admin.id === selectedAdminCard.id)
         : []
+  const trackingReadingCountdown = trackingSummary
+    ? getReadingCountdownLabel(trackingSummary.student.torah_reading_date)
+    : null
+  const trackingReadingDate = trackingSummary?.student.torah_reading_date
+    ? formatGregorianDate(trackingSummary.student.torah_reading_date)
+    : null
+  const trackingDaysUntil = trackingSummary?.student.torah_reading_date
+    ? getDaysUntilReading(trackingSummary.student.torah_reading_date)
+    : null
   const teacherParashaStatusCounts = {
     active: teacherParashot.filter((item) => item.status === 'active').length,
     frozen: teacherParashot.filter((item) => item.status === 'frozen').length,
@@ -450,6 +468,26 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                       ? `${trackingRows.length} תתי־חלקים במעקב`
                       : 'עדיין אין לתלמיד תתי־חלקים מוכנים או משויכים.'}
                   </p>
+                  {trackingReadingCountdown ? (
+                    <p className="mt-2 text-sm font-semibold text-slate-700">
+                      {trackingReadingCountdown}
+                    </p>
+                  ) : trackingReadingDate ? (
+                    <p className="mt-2 text-sm font-semibold text-slate-700">
+                      תאריך הקריאה: {trackingReadingDate}
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-sm text-slate-500">
+                      עדיין לא הוגדר תאריך קריאה לתלמיד.
+                    </p>
+                  )}
+                  {trackingReadingDate && trackingDaysUntil !== null ? (
+                    <p className="mt-1 text-xs text-slate-500">
+                      {trackingDaysUntil >= 0
+                        ? `${trackingDaysUntil} ימים נותרו`
+                        : `${Math.abs(trackingDaysUntil)} ימים מאז הקריאה`}
+                    </p>
+                  ) : null}
                 </div>
               </div>
 
@@ -1079,6 +1117,26 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   placeholder="סיסמה חדשה אם רוצים לעדכן"
                   className="rounded-2xl border border-slate-200 px-4 py-3"
                 />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="grid gap-2 text-sm text-slate-700">
+                    <span>תאריך לידה</span>
+                    <input
+                      name="birth_date"
+                      type="date"
+                      defaultValue={student.birth_date ?? ''}
+                      className="rounded-2xl border border-slate-200 px-4 py-3"
+                    />
+                  </label>
+                  <label className="grid gap-2 text-sm text-slate-700">
+                    <span>תאריך קריאה בתורה</span>
+                    <input
+                      name="torah_reading_date"
+                      type="date"
+                      defaultValue={student.torah_reading_date ?? ''}
+                      className="rounded-2xl border border-slate-200 px-4 py-3"
+                    />
+                  </label>
+                </div>
                 <select
                   name="teacher_parasha_id"
                   defaultValue={student.active_teacher_parasha_id ?? ''}
@@ -1133,6 +1191,24 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               placeholder="סיסמה לתלמיד"
               className="rounded-2xl border border-slate-200 px-4 py-3"
             />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-2 text-sm text-slate-700">
+                <span>תאריך לידה</span>
+                <input
+                  name="birth_date"
+                  type="date"
+                  className="rounded-2xl border border-slate-200 px-4 py-3"
+                />
+              </label>
+              <label className="grid gap-2 text-sm text-slate-700">
+                <span>תאריך קריאה בתורה</span>
+                <input
+                  name="torah_reading_date"
+                  type="date"
+                  className="rounded-2xl border border-slate-200 px-4 py-3"
+                />
+              </label>
+            </div>
             <select
               name="teacher_parasha_id"
               defaultValue=""

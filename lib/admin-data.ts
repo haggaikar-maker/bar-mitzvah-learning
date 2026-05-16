@@ -174,6 +174,8 @@ export async function getAdminDashboardData(selected?: {
             admin_id,
             username,
             name,
+            birth_date,
+            torah_reading_date,
             parasha_id,
             parashot (
               id,

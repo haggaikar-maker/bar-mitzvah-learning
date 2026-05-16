@@ -5,6 +5,7 @@ import { useMemo, useTransition } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import type { AdminSection, AdminTeacherParasha } from '@/lib/admin-data'
 import type { LessonPart } from '@/lib/practice-data'
+import { CenteredLoadingState } from '../../components/centered-loading-state'
 
 type SectionContentSummary = {
   sectionId: number
@@ -36,37 +37,45 @@ export function AdminQueryForm({
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  const [, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransition()
 
   return (
-    <form
-      className={className}
-      onSubmit={(event) => {
-        event.preventDefault()
+    <>
+      <form
+        className={className}
+        onSubmit={(event) => {
+          event.preventDefault()
 
-        const formData = new FormData(event.currentTarget)
-        const nextParams = new URLSearchParams(searchParams.toString())
+          const formData = new FormData(event.currentTarget)
+          const nextParams = new URLSearchParams(searchParams.toString())
 
-        for (const [key, value] of formData.entries()) {
-          const normalizedValue = typeof value === 'string' ? value.trim() : ''
+          for (const [key, value] of formData.entries()) {
+            const normalizedValue = typeof value === 'string' ? value.trim() : ''
 
-          if (normalizedValue) {
-            nextParams.set(key, normalizedValue)
-          } else {
-            nextParams.delete(key)
+            if (normalizedValue) {
+              nextParams.set(key, normalizedValue)
+            } else {
+              nextParams.delete(key)
+            }
           }
-        }
 
-        startTransition(() => {
-          router.replace(
-            `${pathname}?${nextParams.toString()}${hash ? `#${hash}` : ''}`,
-            { scroll: false }
-          )
-        })
-      }}
-    >
-      {children}
-    </form>
+          startTransition(() => {
+            router.replace(
+              `${pathname}?${nextParams.toString()}${hash ? `#${hash}` : ''}`,
+              { scroll: false }
+            )
+          })
+        }}
+      >
+        {children}
+      </form>
+      {isPending ? (
+        <CenteredLoadingState
+          label="טוען..."
+          subtitle="מעדכן את הסינון והנתונים על המסך"
+        />
+      ) : null}
+    </>
   )
 }
 
@@ -82,7 +91,7 @@ export function AdminContentSelector({
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  const [, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransition()
   const parashaId = selectedParashaId?.toString() ?? ''
   const sectionId = selectedSectionId?.toString() ?? ''
   const partId = selectedPartId?.toString() ?? ''
@@ -128,62 +137,70 @@ export function AdminContentSelector({
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-3">
-      <select
-        value={parashaId}
-        onChange={(event) => {
-          const nextParashaId = event.target.value
-          navigate({ parashaId: nextParashaId, partId: '' })
-        }}
-        className="rounded-2xl border border-slate-200 px-4 py-3"
-      >
-        {teacherParashot.length === 0 ? <option value="">אין ספריות זמינות</option> : null}
-        {teacherParashot.map((parasha) => (
-          <option key={parasha.id} value={parasha.id}>
-            {parasha.internal_display_name} | {parasha.owner_display_name} | {parasha.nusach_name}
-          </option>
-        ))}
-      </select>
+    <>
+      <div className="grid gap-4 md:grid-cols-3">
+        <select
+          value={parashaId}
+          onChange={(event) => {
+            const nextParashaId = event.target.value
+            navigate({ parashaId: nextParashaId, partId: '' })
+          }}
+          className="rounded-2xl border border-slate-200 px-4 py-3"
+        >
+          {teacherParashot.length === 0 ? <option value="">אין ספריות זמינות</option> : null}
+          {teacherParashot.map((parasha) => (
+            <option key={parasha.id} value={parasha.id}>
+              {parasha.internal_display_name} | {parasha.owner_display_name} | {parasha.nusach_name}
+            </option>
+          ))}
+        </select>
 
-      <select
-        value={sectionId}
-        onChange={(event) => {
-          const nextSectionId = event.target.value
-          navigate({ sectionId: nextSectionId, partId: '' })
-        }}
-        className="rounded-2xl border border-slate-200 px-4 py-3"
-      >
-        {sections.map((section) => (
-          <option key={section.id} value={section.id}>
-            {(() => {
-              const summary = sectionSummaryById.get(section.id)
-              if (!summary) {
-                return `${section.name} (0)`
-              }
+        <select
+          value={sectionId}
+          onChange={(event) => {
+            const nextSectionId = event.target.value
+            navigate({ sectionId: nextSectionId, partId: '' })
+          }}
+          className="rounded-2xl border border-slate-200 px-4 py-3"
+        >
+          {sections.map((section) => (
+            <option key={section.id} value={section.id}>
+              {(() => {
+                const summary = sectionSummaryById.get(section.id)
+                if (!summary) {
+                  return `${section.name} (0)`
+                }
 
-              return summary.hasContent
-                ? `${section.name} *`
-                : `${section.name} (${summary.partCount})`
-            })()}
-          </option>
-        ))}
-      </select>
+                return summary.hasContent
+                  ? `${section.name} *`
+                  : `${section.name} (${summary.partCount})`
+              })()}
+            </option>
+          ))}
+        </select>
 
-      <select
-        value={partId}
-        onChange={(event) => {
-          const nextPartId = event.target.value
-          navigate({ partId: nextPartId })
-        }}
-        className="rounded-2xl border border-slate-200 px-4 py-3"
-      >
-        <option value="">בחירת תת־חלק</option>
-        {lessonParts.map((part) => (
-          <option key={part.id} value={part.id}>
-            {part.name}
-          </option>
-        ))}
-      </select>
-    </div>
+        <select
+          value={partId}
+          onChange={(event) => {
+            const nextPartId = event.target.value
+            navigate({ partId: nextPartId })
+          }}
+          className="rounded-2xl border border-slate-200 px-4 py-3"
+        >
+          <option value="">בחירת תת־חלק</option>
+          {lessonParts.map((part) => (
+            <option key={part.id} value={part.id}>
+              {part.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      {isPending ? (
+        <CenteredLoadingState
+          label="טוען תוכן..."
+          subtitle="מכין את הפרשה, הקריאה ותתי־החלקים שבחרת"
+        />
+      ) : null}
+    </>
   )
 }

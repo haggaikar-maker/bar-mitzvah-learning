@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { getAdminSession } from '@/lib/admin-auth'
 import { getStudentSession } from '@/lib/student-auth'
 import { loginUser } from './auth-actions'
+import { PendingSubmitButton } from '../components/pending-submit-button'
 
 type HomePageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -76,12 +77,11 @@ export default async function HomePage({ searchParams }: HomePageProps) {
               />
             </label>
 
-            <button
-              type="submit"
-              className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
-            >
-              כניסה למערכת
-            </button>
+            <PendingSubmitButton
+              label="כניסה למערכת"
+              pendingLabel="בודק..."
+              className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-80"
+            />
           </form>
 
           {errorMessage ? (

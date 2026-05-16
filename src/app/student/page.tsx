@@ -1,10 +1,11 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { logoutUser } from '../auth-actions'
 import {
   getStudentDashboardData,
 } from '@/lib/practice-data'
 import { requireStudentSession } from '@/lib/student-auth'
+import { PendingSubmitButton } from '../../components/pending-submit-button'
+import { StudentNavLink } from '../../components/student-nav-link'
 
 export default async function StudentPage() {
   const session = await requireStudentSession()
@@ -78,19 +79,22 @@ export default async function StudentPage() {
         </section>
 
         <div className="flex flex-wrap items-center gap-3">
-          <Link
+          <StudentNavLink
             href="/"
             className="student-floating-chip inline-flex px-4 py-2 text-sm font-semibold text-slate-700"
+            overlayLabel="חוזר..."
+            overlaySubtitle="מעביר אותך למסך ההתחברות"
           >
             חזרה להתחברות
-          </Link>
+          </StudentNavLink>
           <form action={logoutUser}>
-            <button
-              type="submit"
-              className="rounded-2xl bg-[var(--student-ink)] px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-slate-900/15"
-            >
-              יציאה
-            </button>
+            <PendingSubmitButton
+              label="יציאה"
+              pendingLabel="יוצא..."
+              overlayLabel="יוצא..."
+              overlaySubtitle="מסיים את ההתחברות שלך בצורה בטוחה"
+              className="rounded-2xl bg-[var(--student-ink)] px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-slate-900/15 disabled:cursor-wait disabled:opacity-80"
+            />
           </form>
         </div>
 
@@ -122,10 +126,12 @@ export default async function StudentPage() {
                     )
 
                     return (
-                      <Link
+                      <StudentNavLink
                         key={section.id}
                         href={`/student/section/${section.id}`}
                         className="student-section-card p-4 ring-1 ring-white/70"
+                        overlayLabel="טוען קריאה..."
+                        overlaySubtitle="פותח עבורך את תתי־החלקים של הקריאה"
                       >
                         <div className="relative z-10">
                           <div className="flex items-start justify-between gap-3">
@@ -158,7 +164,7 @@ export default async function StudentPage() {
                             </div>
                           </div>
                         </div>
-                      </Link>
+                      </StudentNavLink>
                     )
                   })}
                 </div>

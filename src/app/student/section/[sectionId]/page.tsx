@@ -1,9 +1,10 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { logoutUser } from '../../../auth-actions'
 import { getSectionPageData } from '@/lib/practice-data'
 import { AudioDuration } from '../../../../components/audio-duration'
 import { requireStudentSession } from '@/lib/student-auth'
+import { PendingSubmitButton } from '../../../../components/pending-submit-button'
+import { StudentNavLink } from '../../../../components/student-nav-link'
 
 export default async function SectionPartsPage({
   params,
@@ -52,19 +53,22 @@ export default async function SectionPartsPage({
     <main className="student-app">
       <div className="student-shell max-w-6xl">
         <div className="mb-4 flex flex-wrap items-center gap-3">
-          <Link
+          <StudentNavLink
             href="/student"
             className="student-floating-chip inline-block px-4 py-2 text-sm font-semibold text-slate-700"
+            overlayLabel="חוזר..."
+            overlaySubtitle="מחזיר אותך לרשימת הקריאות"
           >
             חזרה לקריאות
-          </Link>
+          </StudentNavLink>
           <form action={logoutUser}>
-            <button
-              type="submit"
-              className="rounded-xl bg-[var(--student-ink)] px-4 py-2 text-sm font-semibold text-white"
-            >
-              יציאה
-            </button>
+            <PendingSubmitButton
+              label="יציאה"
+              pendingLabel="יוצא..."
+              overlayLabel="יוצא..."
+              overlaySubtitle="מסיים את ההתחברות שלך בצורה בטוחה"
+              className="rounded-xl bg-[var(--student-ink)] px-4 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-80"
+            />
           </form>
         </div>
 
@@ -86,10 +90,12 @@ export default async function SectionPartsPage({
             {parts.length > 0 ? (
               <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
                 {parts.map((part) => (
-                  <Link
+                  <StudentNavLink
                     key={part.id}
                     href={`/student/lesson/${part.id}`}
                     className="student-section-card p-2.5 ring-1 ring-white/70"
+                    overlayLabel="טוען קטע..."
+                    overlaySubtitle="פותח עבורך את תת־החלק שנבחר"
                   >
                     <div className="relative z-10">
                       <div className="flex items-start justify-between gap-2">
@@ -120,7 +126,7 @@ export default async function SectionPartsPage({
                         </div>
                       </div>
                     </div>
-                  </Link>
+                  </StudentNavLink>
                 ))}
               </div>
             ) : (

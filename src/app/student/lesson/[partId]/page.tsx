@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import {
   getLessonPageData,
@@ -7,6 +6,8 @@ import { getLessonMediaKind, getLessonMediaUrl } from '@/lib/lesson-media'
 import { requireStudentSession } from '@/lib/student-auth'
 import { logoutUser } from '../../../auth-actions'
 import LessonExperience from './lesson-experience'
+import { PendingSubmitButton } from '../../../../components/pending-submit-button'
+import { StudentNavLink } from '../../../../components/student-nav-link'
 
 type LessonPageProps = {
   params: Promise<{ partId: string }>
@@ -78,12 +79,14 @@ export default async function LessonPage({
         <div className="student-shell">
           <div className="student-card mx-auto max-w-3xl p-6 sm:p-8">
           <div className="mb-4 flex flex-wrap items-center gap-3">
-            <Link
+            <StudentNavLink
               href="/student"
               className="student-floating-chip inline-block px-4 py-2 text-sm font-semibold text-slate-700"
+              overlayLabel="חוזר..."
+              overlaySubtitle="מחזיר אותך לרשימת הקריאות"
             >
               חזרה לקריאות
-            </Link>
+            </StudentNavLink>
           </div>
 
           <h1 className="text-2xl font-bold text-slate-900">הקטע עדיין לא זמין</h1>
@@ -101,19 +104,22 @@ export default async function LessonPage({
     <main className="student-app">
       <div className="student-shell">
         <div className="mb-4 flex flex-wrap items-center gap-3">
-          <Link
+          <StudentNavLink
             href="/student"
             className="student-floating-chip inline-block px-4 py-2 text-sm font-semibold text-slate-700"
+            overlayLabel="חוזר..."
+            overlaySubtitle="מחזיר אותך לרשימת הקריאות"
           >
             חזרה לקריאות
-          </Link>
+          </StudentNavLink>
           <form action={logoutUser}>
-            <button
-              type="submit"
-              className="rounded-xl bg-[var(--student-ink)] px-4 py-2 text-sm font-semibold text-white"
-            >
-              יציאה
-            </button>
+            <PendingSubmitButton
+              label="יציאה"
+              pendingLabel="יוצא..."
+              overlayLabel="יוצא..."
+              overlaySubtitle="מסיים את ההתחברות שלך בצורה בטוחה"
+              className="rounded-xl bg-[var(--student-ink)] px-4 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-80"
+            />
           </form>
         </div>
 
@@ -123,15 +129,17 @@ export default async function LessonPage({
               <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
                 <div className="min-w-0 text-right">
                   {navigation.previous ? (
-                    <Link
+                    <StudentNavLink
                       href={`/student/lesson/${navigation.previous.id}`}
                       className="block rounded-2xl bg-white/10 px-3 py-2 text-white transition hover:bg-white/20"
+                      overlayLabel="טוען קטע קודם..."
+                      overlaySubtitle="פותח עבורך את תת־החלק הקודם"
                     >
                       <div className="text-[11px] text-white/70">הקודם</div>
                       <div className="truncate text-sm font-semibold">
                         {navigation.previous.name}
                       </div>
-                    </Link>
+                    </StudentNavLink>
                   ) : (
                     <div className="rounded-2xl bg-white/5 px-3 py-2 text-white/50">
                       <div className="text-[11px]">הקודם</div>
@@ -145,15 +153,17 @@ export default async function LessonPage({
                 </div>
                 <div className="min-w-0 text-left">
                   {navigation.next ? (
-                    <Link
+                    <StudentNavLink
                       href={`/student/lesson/${navigation.next.id}`}
                       className="block rounded-2xl bg-white/10 px-3 py-2 text-white transition hover:bg-white/20"
+                      overlayLabel="טוען קטע הבא..."
+                      overlaySubtitle="פותח עבורך את תת־החלק הבא"
                     >
                       <div className="text-[11px] text-white/70">הבא</div>
                       <div className="truncate text-sm font-semibold">
                         {navigation.next.name}
                       </div>
-                    </Link>
+                    </StudentNavLink>
                   ) : (
                     <div className="rounded-2xl bg-white/5 px-3 py-2 text-white/50">
                       <div className="text-[11px]">הבא</div>

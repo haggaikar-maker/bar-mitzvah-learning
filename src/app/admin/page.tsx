@@ -24,6 +24,7 @@ import {
   setTeacherParashaStatus,
   updateMyShareCode,
   resetStudentPartProgress,
+  sendStudentWhatsAppPracticeMessage,
   updateStudentPartVisibility,
   upsertAdmin,
   upsertLessonPart,
@@ -489,6 +490,50 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     </p>
                   ) : null}
                 </div>
+                <div className="min-w-[280px] rounded-3xl bg-white p-4 ring-1 ring-slate-200">
+                  <p className="text-sm font-semibold text-slate-900">שליחת WhatsApp ידנית</p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    {trackingSummary.student.whatsapp_phone
+                      ? `מספר תלמיד: ${trackingSummary.student.whatsapp_phone}`
+                      : 'עדיין לא הוגדר מספר WhatsApp לתלמיד.'}
+                  </p>
+                  {trackingSummary.whatsappRecommendation ? (
+                    <>
+                      <div className="mt-3 rounded-2xl bg-slate-50 p-3 text-xs leading-6 text-slate-700 ring-1 ring-slate-200 whitespace-pre-line">
+                        {trackingSummary.whatsappRecommendation.messageText}
+                      </div>
+                      <div className="mt-2 text-[11px] text-slate-500">
+                        קישור אישי וחד־פעמי ייווצר בזמן השליחה.
+                      </div>
+                      {trackingSummary.whatsappRecommendation.lastMessageAt ? (
+                        <p className="mt-2 text-[11px] text-slate-500">
+                          נשלח לאחרונה: {new Date(trackingSummary.whatsappRecommendation.lastMessageAt).toLocaleString('he-IL')}
+                          {trackingSummary.whatsappRecommendation.lastMessageStatus
+                            ? ` · ${trackingSummary.whatsappRecommendation.lastMessageStatus}`
+                            : ''}
+                        </p>
+                      ) : null}
+                      <form action={sendStudentWhatsAppPracticeMessage} className="mt-3">
+                        <input type="hidden" name="student_id" value={trackingSummary.student.id} />
+                        <input
+                          type="hidden"
+                          name="lesson_part_id"
+                          value={trackingSummary.whatsappRecommendation.lessonPartId}
+                        />
+                        <button
+                          type="submit"
+                          className="w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white"
+                        >
+                          שליחת הודעת WhatsApp
+                        </button>
+                      </form>
+                    </>
+                  ) : (
+                    <p className="mt-3 text-xs text-slate-500">
+                      אין כרגע קטע מומלץ זמין לשליחה או שחסר קישור מערכת.
+                    </p>
+                  )}
+                </div>
               </div>
 
               {trackingRows.length > 0 ? (
@@ -505,12 +550,13 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                       <th className="px-3 py-2 font-semibold">תרגולים</th>
                       <th className="px-3 py-2 font-semibold">השלמות</th>
                       <th className="px-3 py-2 font-semibold">תרגול אחרון</th>
+                      <th className="px-3 py-2 font-semibold">תזכורת</th>
                       <th className="px-3 py-2 font-semibold">איפוס</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 text-slate-700">
                     {trackingRows.map((row) => (
-                      <tr key={`${row.sectionName}-${row.partName}-${row.partOrder}`}>
+                      <tr key={`${row.lessonPartId}-${row.sectionName}-${row.partName}-${row.partOrder}`}>
                         <td className="px-3 py-3">{row.sectionName}</td>
                         <td className="px-3 py-3">
                           <div className="font-medium text-slate-900">{row.partName}</div>
@@ -588,6 +634,37 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                           {row.lastPracticedAt
                             ? new Date(row.lastPracticedAt).toLocaleString('he-IL')
                             : 'עדיין לא תורגל'}
+                        </td>
+                        <td className="px-3 py-3">
+                          {(() => {
+                            const canSendReminder =
+                              row.isVisibleToStudent &&
+                              (row.mediaKind === 'video'
+                                ? row.hasVideo
+                                : row.hasAudio && row.slideCount > 0)
+
+                            return (
+                          <form action={sendStudentWhatsAppPracticeMessage}>
+                            <input
+                              type="hidden"
+                              name="student_id"
+                              value={trackingSummary.student.id}
+                            />
+                            <input
+                              type="hidden"
+                              name="lesson_part_id"
+                              value={row.lessonPartId}
+                            />
+                            <button
+                              type="submit"
+                              disabled={!canSendReminder}
+                              className="w-full rounded-xl bg-emerald-100 px-3 py-2 text-xs font-semibold text-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                            >
+                              {canSendReminder ? 'שלח תזכורת' : 'לא זמין לשליחה'}
+                            </button>
+                          </form>
+                            )
+                          })()}
                         </td>
                         <td className="px-3 py-3">
                           <div className="grid gap-2">
@@ -1117,6 +1194,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   placeholder="סיסמה חדשה אם רוצים לעדכן"
                   className="rounded-2xl border border-slate-200 px-4 py-3"
                 />
+                <input
+                  name="whatsapp_phone"
+                  defaultValue={student.whatsapp_phone ?? ''}
+                  placeholder="מספר WhatsApp, למשל 9725..."
+                  className="rounded-2xl border border-slate-200 px-4 py-3"
+                />
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="grid gap-2 text-sm text-slate-700">
                     <span>תאריך לידה</span>
@@ -1189,6 +1272,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               name="password"
               type="password"
               placeholder="סיסמה לתלמיד"
+              className="rounded-2xl border border-slate-200 px-4 py-3"
+            />
+            <input
+              name="whatsapp_phone"
+              placeholder="מספר WhatsApp, למשל 9725..."
               className="rounded-2xl border border-slate-200 px-4 py-3"
             />
             <div className="grid gap-3 sm:grid-cols-2">

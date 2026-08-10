@@ -43,6 +43,7 @@ export type Student = {
   name: string
   birth_date?: string | null
   torah_reading_date?: string | null
+  whatsapp_phone?: string | null
   parasha_id: number | null
   parashot: Parasha | Parasha[] | null
   active_teacher_parasha_id?: number | null
@@ -420,6 +421,7 @@ export async function getStudents() {
         name,
         birth_date,
         torah_reading_date,
+        whatsapp_phone,
         parasha_id,
         parashot (
           id,
@@ -444,6 +446,7 @@ export async function getActiveStudent(studentId?: number | null) {
       name,
       birth_date,
       torah_reading_date,
+      whatsapp_phone,
       parasha_id,
       parashot (
         id,

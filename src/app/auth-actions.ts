@@ -11,9 +11,22 @@ function readString(formData: FormData, key: string) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function sanitizeRedirectTarget(path: string) {
+  if (!path || !path.startsWith('/') || path.startsWith('//')) {
+    return null
+  }
+
+  if (!/^\/(student|admin)(\/|$)/.test(path)) {
+    return null
+  }
+
+  return path
+}
+
 export async function loginUser(formData: FormData) {
   const username = readString(formData, 'username')
   const password = readString(formData, 'password')
+  const nextPath = sanitizeRedirectTarget(readString(formData, 'next'))
   const configuredAdmin = getConfiguredAdmin()
 
   if (!username || !password) {
@@ -29,7 +42,7 @@ export async function loginUser(formData: FormData) {
   if (admin && verifyPassword(password, admin.password_hash)) {
     await clearStudentSession()
     await createAdminSession({ username: admin.username, adminId: admin.id })
-    redirect('/admin')
+    redirect(nextPath?.startsWith('/admin') ? nextPath : '/admin')
   }
 
   if (
@@ -39,7 +52,7 @@ export async function loginUser(formData: FormData) {
   ) {
     await clearStudentSession()
     await createAdminSession({ username })
-    redirect('/admin')
+    redirect(nextPath?.startsWith('/admin') ? nextPath : '/admin')
   }
 
   const { data: student } = await supabase
@@ -51,7 +64,7 @@ export async function loginUser(formData: FormData) {
   if (student && student.password_hash && verifyPassword(password, student.password_hash)) {
     await clearAdminSession()
     await createStudentSession(student.id)
-    redirect('/student')
+    redirect(nextPath?.startsWith('/student') ? nextPath : '/student')
   }
 
   redirect('/?error=invalid')

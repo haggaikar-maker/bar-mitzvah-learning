@@ -16,11 +16,21 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   ])
 
   if (adminSession) {
-    redirect('/admin')
+    const nextPath =
+      typeof resolvedSearchParams.next === 'string' &&
+      resolvedSearchParams.next.startsWith('/admin')
+        ? resolvedSearchParams.next
+        : '/admin'
+    redirect(nextPath)
   }
 
   if (studentSession) {
-    redirect('/student')
+    const nextPath =
+      typeof resolvedSearchParams.next === 'string' &&
+      resolvedSearchParams.next.startsWith('/student')
+        ? resolvedSearchParams.next
+        : '/student'
+    redirect(nextPath)
   }
 
   const errorCode = Array.isArray(resolvedSearchParams.error)
@@ -32,6 +42,8 @@ export default async function HomePage({ searchParams }: HomePageProps) {
       ? 'יש למלא שם משתמש וסיסמה.'
       : errorCode === 'invalid'
         ? 'שם המשתמש או הסיסמה אינם נכונים.'
+        : errorCode === 'access-link'
+          ? 'הקישור האישי כבר נוצל או שפג תוקפו. בקש קישור חדש מהמנהל.'
         : null
 
   return (
@@ -55,6 +67,11 @@ export default async function HomePage({ searchParams }: HomePageProps) {
           </h2>
 
           <form action={loginUser} className="mt-8 space-y-4">
+            <input
+              type="hidden"
+              name="next"
+              value={typeof resolvedSearchParams.next === 'string' ? resolvedSearchParams.next : ''}
+            />
             <label className="block">
               <span className="mb-2 block text-sm font-medium text-slate-700">
                 שם משתמש

@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type { AdminSession } from '@/lib/admin-auth'
 import type { LessonPart, LessonSlide, Section, Student } from '@/lib/practice-data'
 import { getLessonMediaKind, type LessonMediaKind } from '@/lib/lesson-media'
@@ -105,6 +106,15 @@ export type StudentTrackingRow = {
 export type StudentTrackingSummary = {
   student: AdminStudent
   rows: StudentTrackingRow[]
+  whatsappRecommendation: {
+    lessonPartId: number
+    sectionName: string
+    partName: string
+    messageText: string
+    lessonLink: string
+    lastMessageAt: string | null
+    lastMessageStatus: string | null
+  } | null
 }
 
 function resolveTeacherParashaChain(
@@ -176,6 +186,7 @@ export async function getAdminDashboardData(selected?: {
             name,
             birth_date,
             torah_reading_date,
+            whatsapp_phone,
             parasha_id,
             parashot (
               id,
@@ -824,11 +835,21 @@ export async function getAdminDashboardData(selected?: {
       const parts = (trackingParts ?? []) as LessonPart[]
       const partIds = parts.map((part) => part.id)
 
+      const adminClientForWhatsapp =
+        (() => {
+          try {
+            return getSupabaseAdmin()
+          } catch {
+            return null
+          }
+        })()
+
       const [
         { data: slidesData, error: slidesError },
         { data: practiceEvents, error: practiceEventsError },
         { data: studentRecordings, error: studentRecordingsError },
         { data: partSettings, error: partSettingsError },
+        { data: whatsappMessages, error: whatsappMessagesError },
       ] =
         await Promise.all([
           partIds.length
@@ -859,9 +880,17 @@ export async function getAdminDashboardData(selected?: {
                 .eq('student_id', trackingStudent.id)
                 .in('lesson_part_id', partIds)
             : Promise.resolve({ data: [], error: null }),
+          adminClientForWhatsapp
+            ? adminClientForWhatsapp
+                .from('whatsapp_messages')
+                .select('sent_at, status')
+                .eq('student_id', trackingStudent.id)
+                .order('sent_at', { ascending: false })
+                .limit(1)
+            : Promise.resolve({ data: [], error: null }),
         ])
 
-      if (slidesError || practiceEventsError || studentRecordingsError || partSettingsError) {
+      if (slidesError || practiceEventsError || studentRecordingsError || partSettingsError || whatsappMessagesError) {
         return {
           parashot: availableParashot,
           sections: availableSections,
@@ -877,7 +906,7 @@ export async function getAdminDashboardData(selected?: {
           selectedTrackingStudentId,
           trackingSummary,
           parashaSources,
-          error: slidesError ?? practiceEventsError ?? studentRecordingsError ?? partSettingsError,
+          error: slidesError ?? practiceEventsError ?? studentRecordingsError ?? partSettingsError ?? whatsappMessagesError,
         }
       }
 
@@ -983,20 +1012,67 @@ export async function getAdminDashboardData(selected?: {
         })
       )
 
+      const recommendedRow =
+        rows.find((row) => row.isVisibleToStudent && row.completedCount < row.completionTarget) ??
+        rows.find((row) => row.isVisibleToStudent) ??
+        null
+      const daysUntilReading =
+        trackingStudent.torah_reading_date
+          ? Math.round(
+              (
+                new Date(`${trackingStudent.torah_reading_date}T12:00:00`).getTime() -
+                new Date(
+                  new Date().getFullYear(),
+                  new Date().getMonth(),
+                  new Date().getDate(),
+                  12,
+                  0,
+                  0,
+                  0
+                ).getTime()
+              ) /
+                (1000 * 60 * 60 * 24)
+            )
+          : null
+      const lastWhatsappMessage = ((whatsappMessages ?? []) as Array<{
+        sent_at: string
+        status: string
+      }>)[0] ?? null
+
       trackingSummary = {
         student: trackingStudent,
         rows,
+        whatsappRecommendation: recommendedRow
+          ? {
+              lessonPartId: recommendedRow.lessonPartId,
+              sectionName: recommendedRow.sectionName,
+              partName: recommendedRow.partName,
+              messageText: [
+                `שלום ${trackingStudent.name},`,
+                `היום כדאי לתרגל את ${recommendedRow.sectionName} חלק ${recommendedRow.partName}.`,
+                ...(daysUntilReading !== null
+                  ? [`נשארו ${daysUntilReading} ימים לקריאה בתורה.`]
+                  : []),
+                'קישור אישי לקטע ייווצר בזמן השליחה.',
+              ].join('\n'),
+              lessonLink: '',
+              lastMessageAt: lastWhatsappMessage?.sent_at ?? null,
+              lastMessageStatus: lastWhatsappMessage?.status ?? null,
+            }
+          : null,
       }
     } else {
       trackingSummary = {
         student: trackingStudent,
         rows: [],
+        whatsappRecommendation: null,
       }
     }
   } else if (trackingStudent) {
     trackingSummary = {
       student: trackingStudent,
       rows: [],
+      whatsappRecommendation: null,
     }
   }
 

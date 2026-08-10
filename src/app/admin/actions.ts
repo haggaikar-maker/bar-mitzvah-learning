@@ -25,6 +25,7 @@ import {
   sanitizePhoneNumber,
   sendWhatsAppTextMessage,
 } from '@/lib/whatsapp'
+import { buildWhatsAppBotMenuText, getStudentWhatsAppCatalog } from '@/lib/whatsapp-bot'
 import { getDaysUntilReading } from '@/lib/student-schedule'
 import { createStudentDirectAccessLink } from '@/lib/student-direct-links'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
@@ -736,6 +737,65 @@ export async function sendStudentWhatsAppPracticeMessage(formData: FormData) {
     }
 
     const message = error instanceof Error ? error.message : 'שליחת ההודעה נכשלה.'
+    redirect(
+      buildAdminActionRedirectPath({
+        returnPath,
+        status: 'error',
+        message,
+      })
+    )
+  }
+}
+
+export async function sendStudentWhatsAppBotMenuMessage(formData: FormData) {
+  const returnPath = readString(formData, 'return_path') || '/admin'
+
+  try {
+    const session = await requireAdminSession()
+    const studentId = readNumber(formData, 'student_id')
+
+    if (!studentId) {
+      throw new Error('חסר מזהה תלמיד לשליחת הודעת הבוט.')
+    }
+
+    const catalog = await getStudentWhatsAppCatalog(studentId)
+
+    if (session.role !== 'primary' && catalog.student.admin_id !== session.id) {
+      throw new Error('אין הרשאה לשלוח הודעת WhatsApp לתלמיד זה.')
+    }
+
+    if (!catalog.student.whatsapp_phone) {
+      throw new Error('לא הוגדר מספר WhatsApp לתלמיד.')
+    }
+
+    if (catalog.parts.length === 0) {
+      throw new Error('אין כרגע תתי־חלקים פתוחים ומוכנים להצגה לתלמיד.')
+    }
+
+    const messageText = buildWhatsAppBotMenuText({
+      studentName: catalog.student.name,
+      parts: catalog.parts,
+    })
+
+    await sendWhatsAppTextMessage({
+      to: sanitizePhoneNumber(catalog.student.whatsapp_phone),
+      body: messageText,
+    })
+
+    revalidatePath('/admin')
+    redirect(
+      buildAdminActionRedirectPath({
+        returnPath,
+        status: 'success',
+        message: `תפריט הבוט נשלח ל-${catalog.student.name}.`,
+      })
+    )
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw error
+    }
+
+    const message = error instanceof Error ? error.message : 'שליחת הודעת הבוט נכשלה.'
     redirect(
       buildAdminActionRedirectPath({
         returnPath,

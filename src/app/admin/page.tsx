@@ -25,6 +25,7 @@ import {
   updateMyShareCode,
   resetStudentPartProgress,
   saveWhatsAppTemplate,
+  sendStudentWhatsAppBotMenuMessage,
   sendStudentWhatsAppPracticeMessage,
   updateStudentPartVisibility,
   upsertAdmin,
@@ -248,6 +249,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   const canSendTrackingReminder =
     Boolean(trackingSummary?.student.whatsapp_phone) &&
     Boolean(trackingSummary?.whatsappRecommendation)
+  const canSendTrackingBotMenu =
+    Boolean(trackingSummary?.student.whatsapp_phone) &&
+    trackingRows.some((row) =>
+      row.isVisibleToStudent &&
+      (row.mediaKind === 'video' ? row.hasVideo : row.hasAudio && row.slideCount > 0)
+    )
   const currentAdminReturnParams = new URLSearchParams()
   for (const [key, value] of Object.entries(resolvedSearchParams)) {
     if (key === 'waStatus' || key === 'waMessage') {
@@ -554,6 +561,18 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                           overlaySubtitle="מכין קישור אישי ושולח אותו לתלמיד"
                           disabled={!canSendTrackingReminder}
                           className="w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:cursor-wait disabled:bg-emerald-400"
+                        />
+                      </form>
+                      <form action={sendStudentWhatsAppBotMenuMessage} className="mt-3">
+                        <input type="hidden" name="student_id" value={trackingSummary.student.id} />
+                        <input type="hidden" name="return_path" value={currentAdminReturnPath} />
+                        <PendingSubmitButton
+                          label={canSendTrackingBotMenu ? 'שליחת הודעת בוט' : 'אין תפריט זמין'}
+                          pendingLabel="שולח..."
+                          overlayLabel="שולח הודעת בוט..."
+                          overlaySubtitle="שולח לתלמיד רשימת קטעים פתוחים לבחירה ב-WhatsApp"
+                          disabled={!canSendTrackingBotMenu}
+                          className="w-full rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600"
                         />
                       </form>
                     </>

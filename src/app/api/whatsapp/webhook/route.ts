@@ -83,15 +83,31 @@ async function logOutgoingBotSelectionMessage(input: {
 }
 
 async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) {
+  console.log('whatsapp webhook incoming text', {
+    rawPhone,
+    bodyText,
+  })
+
   const student = await findStudentByWhatsAppPhone(rawPhone)
 
   if (!student) {
+    console.log('whatsapp webhook student not found', {
+      rawPhone,
+    })
     return
   }
+
+  console.log('whatsapp webhook matched student', {
+    studentId: student.id,
+    studentName: student.name,
+  })
 
   const catalog = await getStudentWhatsAppCatalog(student.id)
 
   if (catalog.parts.length === 0) {
+    console.log('whatsapp webhook empty catalog', {
+      studentId: catalog.student.id,
+    })
     await sendWhatsAppTextMessage({
       to: rawPhone,
       body: buildWhatsAppBotEmptyCatalogText(catalog.student.name),
@@ -100,6 +116,17 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
   }
 
   const selection = parseWhatsAppBotSelection(bodyText)
+
+  console.log('whatsapp webhook parsed selection', {
+    studentId: catalog.student.id,
+    selection,
+    availableParts: catalog.parts.map((part, index) => ({
+      index: index + 1,
+      lessonPartId: part.lessonPartId,
+      sectionName: part.sectionName,
+      partName: part.partName,
+    })),
+  })
 
   if (selection === 'menu') {
     await sendWhatsAppTextMessage({
@@ -126,6 +153,11 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
   const selectedPart = catalog.parts[selection - 1]
 
   if (!selectedPart) {
+    console.log('whatsapp webhook invalid numeric selection', {
+      studentId: catalog.student.id,
+      selection,
+      partCount: catalog.parts.length,
+    })
     await sendWhatsAppTextMessage({
       to: rawPhone,
       body: buildWhatsAppBotInvalidSelectionText({
@@ -135,6 +167,13 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
     })
     return
   }
+
+  console.log('whatsapp webhook selected part', {
+    studentId: catalog.student.id,
+    lessonPartId: selectedPart.lessonPartId,
+    sectionName: selectedPart.sectionName,
+    partName: selectedPart.partName,
+  })
 
   const lessonLink = await createStudentDirectAccessLink({
     studentId: catalog.student.id,
@@ -186,6 +225,13 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const payload = (await request.json()) as IncomingWhatsAppPayload
+    console.log('whatsapp webhook payload summary', {
+      entryCount: payload.entry?.length ?? 0,
+      messageCount:
+        payload.entry?.flatMap((entry) =>
+          entry.changes?.flatMap((change) => change.value?.messages ?? []) ?? []
+        ).length ?? 0,
+    })
     const messages =
       payload.entry?.flatMap((entry) =>
         entry.changes?.flatMap((change) => change.value?.messages ?? []) ?? []
@@ -195,7 +241,18 @@ export async function POST(request: Request) {
       const from = message.from
       const textBody = message.text?.body?.trim()
 
+      console.log('whatsapp webhook message envelope', {
+        from,
+        type: message.type,
+        hasText: Boolean(textBody),
+      })
+
       if (!from || message.type !== 'text' || !textBody) {
+        console.log('whatsapp webhook skipped message', {
+          from,
+          type: message.type,
+          hasText: Boolean(textBody),
+        })
         continue
       }
 

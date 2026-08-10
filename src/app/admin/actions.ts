@@ -482,6 +482,19 @@ export async function sendStudentWhatsAppPracticeMessage(formData: FormData) {
       throw new Error('לא הוגדר מספר WhatsApp לתלמיד.')
     }
 
+    const { data: templateRow, error: templateError } =
+      session.id
+        ? await supabase
+            .from('whatsapp_message_templates')
+            .select('template_text')
+            .eq('admin_id', session.id)
+            .maybeSingle()
+        : { data: null, error: null }
+
+    if (templateError) {
+      throw new Error(templateError.message)
+    }
+
     const { data: activeAssignment, error: assignmentError } = await supabase
       .from('student_teacher_parasha_assignments')
       .select('teacher_parasha_id')
@@ -654,6 +667,7 @@ export async function sendStudentWhatsAppPracticeMessage(formData: FormData) {
       adminId: session.id ?? student.admin_id ?? null,
     })
     const messageText = buildPracticeReminderText({
+      templateText: (templateRow as { template_text?: string | null } | null)?.template_text ?? null,
       studentName: student.name,
       sectionName: groupMeta?.sectionName ?? 'הקטע הבא',
       partName: selectedPart.name,
@@ -707,6 +721,61 @@ export async function sendStudentWhatsAppPracticeMessage(formData: FormData) {
       })
     )
   }
+}
+
+export async function saveWhatsAppTemplate(formData: FormData) {
+  const session = await requireAdminSession()
+  const returnPath = readString(formData, 'return_path') || '/admin'
+  const templateText = readString(formData, 'template_text')
+
+  if (!session.id) {
+    redirect(
+      buildAdminActionRedirectPath({
+        returnPath,
+        status: 'error',
+        message: 'אי אפשר לשמור תבנית בלי מנהל שמור בבסיס הנתונים.',
+      })
+    )
+  }
+
+  if (!templateText) {
+    redirect(
+      buildAdminActionRedirectPath({
+        returnPath,
+        status: 'error',
+        message: 'יש להזין טקסט לתבנית ההודעה.',
+      })
+    )
+  }
+
+  const { error } = await supabase
+    .from('whatsapp_message_templates')
+    .upsert({
+      admin_id: session.id,
+      template_text: templateText,
+      updated_at: new Date().toISOString(),
+    }, {
+      onConflict: 'admin_id',
+    })
+
+  if (error) {
+    redirect(
+      buildAdminActionRedirectPath({
+        returnPath,
+        status: 'error',
+        message: error.message,
+      })
+    )
+  }
+
+  revalidatePath('/admin')
+  redirect(
+    buildAdminActionRedirectPath({
+      returnPath,
+      status: 'success',
+      message: 'תבנית ה-WhatsApp נשמרה.',
+    })
+  )
 }
 
 export async function ensureLessonGroup(formData: FormData) {

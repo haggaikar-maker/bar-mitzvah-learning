@@ -24,6 +24,7 @@ import {
   setTeacherParashaStatus,
   updateMyShareCode,
   resetStudentPartProgress,
+  saveWhatsAppTemplate,
   sendStudentWhatsAppPracticeMessage,
   updateStudentPartVisibility,
   upsertAdmin,
@@ -530,12 +531,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   </p>
                   {trackingSummary.whatsappRecommendation ? (
                     <>
-                      <div className="mt-3 rounded-2xl bg-slate-50 p-3 text-xs leading-6 text-slate-700 ring-1 ring-slate-200 whitespace-pre-line">
-                        {trackingSummary.whatsappRecommendation.messageText}
-                      </div>
-                      <div className="mt-2 text-[11px] text-slate-500">
-                        קישור אישי וחד־פעמי ייווצר בזמן השליחה.
-                      </div>
                       {trackingSummary.whatsappRecommendation.lastMessageAt ? (
                         <p className="mt-2 text-[11px] text-slate-500">
                           נשלח לאחרונה: {new Date(trackingSummary.whatsappRecommendation.lastMessageAt).toLocaleString('he-IL')}
@@ -772,6 +767,34 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   לתלמיד הזה עדיין אין תתי־חלקים משויכים עם נתוני מעקב להצגה.
                 </div>
               )}
+
+              <div className="mt-6 rounded-3xl bg-white p-4 ring-1 ring-slate-200">
+                <h4 className="text-sm font-semibold text-slate-900">תבנית הודעת WhatsApp</h4>
+                <p className="mt-2 text-xs leading-6 text-slate-500">
+                  אפשר להשתמש במשתנים: <code>%PART%</code>, <code>%SECTION%</code>, <code>%STUDENT%</code>, <code>%DAYS%</code>, <code>%COUNTDOWN%</code>.
+                </p>
+                <form action={saveWhatsAppTemplate} className="mt-4">
+                  <input type="hidden" name="return_path" value={currentAdminReturnPath} />
+                  <textarea
+                    name="template_text"
+                    defaultValue={trackingSummary.whatsappTemplateText}
+                    rows={6}
+                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-7 text-slate-700 outline-none"
+                  />
+                  <p className="mt-3 text-[11px] text-slate-500">
+                    הקישור הישיר לקטע יתווסף אוטומטית בסוף כל הודעה.
+                  </p>
+                  <div className="mt-4">
+                    <PendingSubmitButton
+                      label="שמירת תבנית"
+                      pendingLabel="שומר..."
+                      overlayLabel="שומר תבנית..."
+                      overlaySubtitle="מעדכן את ברירת המחדל של הודעות ה-WhatsApp"
+                      className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-wait disabled:bg-slate-500"
+                    />
+                  </div>
+                </form>
+              </div>
             </div>
           ) : null}
         </DisclosureSection>

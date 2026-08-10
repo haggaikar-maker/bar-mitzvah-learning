@@ -4,6 +4,10 @@ import type { AdminSession } from '@/lib/admin-auth'
 import type { LessonPart, LessonSlide, Section, Student } from '@/lib/practice-data'
 import { getLessonMediaKind, type LessonMediaKind } from '@/lib/lesson-media'
 import { createSignedStorageUrl } from '@/lib/storage-files'
+import {
+  buildPracticeReminderText,
+  DEFAULT_WHATSAPP_TEMPLATE,
+} from '@/lib/whatsapp'
 
 export type AdminParasha = {
   id: number
@@ -106,6 +110,7 @@ export type StudentTrackingRow = {
 export type StudentTrackingSummary = {
   student: AdminStudent
   rows: StudentTrackingRow[]
+  whatsappTemplateText: string
   whatsappRecommendation: {
     lessonPartId: number
     sectionName: string
@@ -850,6 +855,7 @@ export async function getAdminDashboardData(selected?: {
         { data: studentRecordings, error: studentRecordingsError },
         { data: partSettings, error: partSettingsError },
         { data: whatsappMessages, error: whatsappMessagesError },
+        { data: whatsappTemplateRows, error: whatsappTemplateError },
       ] =
         await Promise.all([
           partIds.length
@@ -888,9 +894,16 @@ export async function getAdminDashboardData(selected?: {
                 .order('sent_at', { ascending: false })
                 .limit(1)
             : Promise.resolve({ data: [], error: null }),
+          session?.id
+            ? supabase
+                .from('whatsapp_message_templates')
+                .select('template_text')
+                .eq('admin_id', session.id)
+                .maybeSingle()
+            : Promise.resolve({ data: null, error: null }),
         ])
 
-      if (slidesError || practiceEventsError || studentRecordingsError || partSettingsError || whatsappMessagesError) {
+      if (slidesError || practiceEventsError || studentRecordingsError || partSettingsError || whatsappMessagesError || whatsappTemplateError) {
         return {
           parashot: availableParashot,
           sections: availableSections,
@@ -906,7 +919,7 @@ export async function getAdminDashboardData(selected?: {
           selectedTrackingStudentId,
           trackingSummary,
           parashaSources,
-          error: slidesError ?? practiceEventsError ?? studentRecordingsError ?? partSettingsError ?? whatsappMessagesError,
+          error: slidesError ?? practiceEventsError ?? studentRecordingsError ?? partSettingsError ?? whatsappMessagesError ?? whatsappTemplateError,
         }
       }
 
@@ -1038,23 +1051,27 @@ export async function getAdminDashboardData(selected?: {
         sent_at: string
         status: string
       }>)[0] ?? null
+      const whatsappTemplateText =
+        ((whatsappTemplateRows as { template_text?: string | null } | null)?.template_text ?? null) ||
+        DEFAULT_WHATSAPP_TEMPLATE
 
       trackingSummary = {
         student: trackingStudent,
         rows,
+        whatsappTemplateText,
         whatsappRecommendation: recommendedRow
           ? {
               lessonPartId: recommendedRow.lessonPartId,
               sectionName: recommendedRow.sectionName,
               partName: recommendedRow.partName,
-              messageText: [
-                `שלום ${trackingStudent.name},`,
-                `היום כדאי לתרגל את ${recommendedRow.sectionName} חלק ${recommendedRow.partName}.`,
-                ...(daysUntilReading !== null
-                  ? [`נשארו ${daysUntilReading} ימים לקריאה בתורה.`]
-                  : []),
-                'קישור אישי לקטע ייווצר בזמן השליחה.',
-              ].join('\n'),
+              messageText: buildPracticeReminderText({
+                templateText: whatsappTemplateText,
+                studentName: trackingStudent.name,
+                sectionName: recommendedRow.sectionName,
+                partName: recommendedRow.partName,
+                daysUntilReading,
+                lessonLink: '[קישור אישי יתווסף בזמן השליחה]',
+              }),
               lessonLink: '',
               lastMessageAt: lastWhatsappMessage?.sent_at ?? null,
               lastMessageStatus: lastWhatsappMessage?.status ?? null,
@@ -1065,6 +1082,7 @@ export async function getAdminDashboardData(selected?: {
       trackingSummary = {
         student: trackingStudent,
         rows: [],
+        whatsappTemplateText: DEFAULT_WHATSAPP_TEMPLATE,
         whatsappRecommendation: null,
       }
     }
@@ -1072,6 +1090,7 @@ export async function getAdminDashboardData(selected?: {
     trackingSummary = {
       student: trackingStudent,
       rows: [],
+      whatsappTemplateText: DEFAULT_WHATSAPP_TEMPLATE,
       whatsappRecommendation: null,
     }
   }

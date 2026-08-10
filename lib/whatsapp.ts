@@ -5,6 +5,12 @@ type WhatsAppTextSendInput = {
   body: string
 }
 
+export const DEFAULT_WHATSAPP_TEMPLATE = [
+  'שלום %STUDENT%',
+  'היום כדאי לתרגל את %SECTION% חלק %PART%.',
+  '%COUNTDOWN%',
+].join('\n')
+
 export type WhatsAppSendResult = {
   messageId: string | null
   responseBody: unknown
@@ -53,25 +59,37 @@ export function buildStudentLoginLink(input: { lessonPartId: number }) {
 }
 
 export function buildPracticeReminderText(input: {
+  templateText?: string | null
   studentName: string
   sectionName: string
   partName: string
   daysUntilReading: number | null
   lessonLink: string
 }) {
-  const lines = [
-    `שלום ${input.studentName},`,
-    `היום כדאי לתרגל את ${input.sectionName} חלק ${input.partName}.`,
-  ]
+  const countdownText =
+    input.daysUntilReading !== null
+      ? `נשארו ${input.daysUntilReading} ימים לקריאה בתורה.`
+      : ''
+  const baseTemplate = input.templateText?.trim() || DEFAULT_WHATSAPP_TEMPLATE
+  const messageBody = baseTemplate
+    .replaceAll('%STUDENT%', input.studentName)
+    .replaceAll('%SECTION%', input.sectionName)
+    .replaceAll('%PART%', input.partName)
+    .replaceAll('%DAYS%', input.daysUntilReading !== null ? String(input.daysUntilReading) : '')
+    .replaceAll('%COUNTDOWN%', countdownText)
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line, index, lines) => {
+      if (line !== '') {
+        return true
+      }
 
-  if (input.daysUntilReading !== null) {
-    lines.push(`נשארו ${input.daysUntilReading} ימים לקריאה בתורה.`)
-  }
+      return index > 0 && index < lines.length - 1 && lines[index - 1] !== '' && lines[index + 1] !== ''
+    })
+    .join('\n')
+    .trim()
 
-  lines.push('קישור ישיר לקטע:')
-  lines.push(input.lessonLink)
-
-  return lines.join('\n')
+  return `${messageBody}\n\nקישור ישיר לקטע:\n${input.lessonLink}`
 }
 
 export async function sendWhatsAppTextMessage(input: WhatsAppTextSendInput) {

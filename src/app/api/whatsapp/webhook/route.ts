@@ -108,9 +108,15 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
     console.log('whatsapp webhook empty catalog', {
       studentId: catalog.student.id,
     })
+    console.log('whatsapp webhook sending empty catalog response', {
+      to: rawPhone,
+    })
     await sendWhatsAppTextMessage({
       to: rawPhone,
       body: buildWhatsAppBotEmptyCatalogText(catalog.student.name),
+    })
+    console.log('whatsapp webhook sent empty catalog response', {
+      to: rawPhone,
     })
     return
   }
@@ -129,6 +135,10 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
   })
 
   if (selection === 'menu') {
+    console.log('whatsapp webhook sending menu response', {
+      studentId: catalog.student.id,
+      to: rawPhone,
+    })
     await sendWhatsAppTextMessage({
       to: rawPhone,
       body: buildWhatsAppBotMenuText({
@@ -136,16 +146,28 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
         parts: catalog.parts,
       }),
     })
+    console.log('whatsapp webhook sent menu response', {
+      studentId: catalog.student.id,
+      to: rawPhone,
+    })
     return
   }
 
   if (selection === null) {
+    console.log('whatsapp webhook sending invalid selection response', {
+      studentId: catalog.student.id,
+      to: rawPhone,
+    })
     await sendWhatsAppTextMessage({
       to: rawPhone,
       body: buildWhatsAppBotInvalidSelectionText({
         studentName: catalog.student.name,
         parts: catalog.parts,
       }),
+    })
+    console.log('whatsapp webhook sent invalid selection response', {
+      studentId: catalog.student.id,
+      to: rawPhone,
     })
     return
   }
@@ -158,12 +180,20 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
       selection,
       partCount: catalog.parts.length,
     })
+    console.log('whatsapp webhook sending out-of-range selection response', {
+      studentId: catalog.student.id,
+      to: rawPhone,
+    })
     await sendWhatsAppTextMessage({
       to: rawPhone,
       body: buildWhatsAppBotInvalidSelectionText({
         studentName: catalog.student.name,
         parts: catalog.parts,
       }),
+    })
+    console.log('whatsapp webhook sent out-of-range selection response', {
+      studentId: catalog.student.id,
+      to: rawPhone,
     })
     return
   }
@@ -187,9 +217,20 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
     lessonLink,
   })
 
+  console.log('whatsapp webhook sending selected part response', {
+    studentId: catalog.student.id,
+    lessonPartId: selectedPart.lessonPartId,
+    to: rawPhone,
+  })
   const sendResult = await sendWhatsAppTextMessage({
     to: rawPhone,
     body: responseText,
+  })
+  console.log('whatsapp webhook sent selected part response', {
+    studentId: catalog.student.id,
+    lessonPartId: selectedPart.lessonPartId,
+    to: rawPhone,
+    messageId: sendResult.messageId,
   })
 
   await logOutgoingBotSelectionMessage({

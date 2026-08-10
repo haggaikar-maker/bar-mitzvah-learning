@@ -9,6 +9,7 @@ type PendingSubmitButtonProps = {
   overlayLabel?: string
   overlaySubtitle?: string
   className?: string
+  disabled?: boolean
 }
 
 export function PendingSubmitButton({
@@ -17,20 +18,22 @@ export function PendingSubmitButton({
   overlayLabel = 'מתחבר...',
   overlaySubtitle = 'בודק את הפרטים ומעביר אותך למסך המתאים',
   className,
+  disabled = false,
 }: PendingSubmitButtonProps) {
   const { pending } = useFormStatus()
+  const isDisabled = disabled || pending
 
   return (
     <>
       <button
         type="submit"
-        disabled={pending}
+        disabled={isDisabled}
         className={className}
         aria-busy={pending}
       >
         {pending ? pendingLabel : label}
       </button>
-      {pending ? (
+      {pending && !disabled ? (
         <CenteredLoadingState
           label={overlayLabel}
           subtitle={overlaySubtitle}

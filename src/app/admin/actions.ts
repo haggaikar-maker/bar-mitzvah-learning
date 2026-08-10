@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
+import { isRedirectError } from 'next/dist/client/components/redirect-error'
 import {
   clearAdminSession,
   createAdminSession,
@@ -31,6 +32,22 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin'
 function readString(formData: FormData, key: string) {
   const value = formData.get(key)
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function sanitizeAdminReturnPath(path: string) {
+  return path.startsWith('/admin') && !path.startsWith('//') ? path : '/admin'
+}
+
+function buildAdminActionRedirectPath(input: {
+  returnPath: string
+  status: 'success' | 'error'
+  message: string
+}) {
+  const safeReturnPath = sanitizeAdminReturnPath(input.returnPath)
+  const url = new URL(`https://local${safeReturnPath}`)
+  url.searchParams.set('waStatus', input.status)
+  url.searchParams.set('waMessage', input.message)
+  return `${url.pathname}?${url.searchParams.toString()}`
 }
 
 type WhatsAppMessagesAdminClient = {
@@ -436,236 +453,260 @@ export async function upsertStudent(formData: FormData) {
 }
 
 export async function sendStudentWhatsAppPracticeMessage(formData: FormData) {
-  const session = await requireAdminSession()
-  const studentId = readNumber(formData, 'student_id')
-  const requestedLessonPartId = readNumber(formData, 'lesson_part_id')
+  const returnPath = readString(formData, 'return_path') || '/admin'
 
-  if (!studentId) {
-    throw new Error('חסר מזהה תלמיד לשליחת הודעת WhatsApp.')
-  }
+  try {
+    const session = await requireAdminSession()
+    const studentId = readNumber(formData, 'student_id')
+    const requestedLessonPartId = readNumber(formData, 'lesson_part_id')
 
-  const { data: student, error: studentError } = await supabase
-    .from('students')
-    .select('id, admin_id, name, whatsapp_phone, torah_reading_date')
-    .eq('id', studentId)
-    .maybeSingle()
-
-  if (studentError || !student) {
-    throw new Error(studentError?.message ?? 'התלמיד לא נמצא.')
-  }
-
-  if (session.role !== 'primary' && student.admin_id !== session.id) {
-    throw new Error('אין הרשאה לשלוח הודעת WhatsApp לתלמיד זה.')
-  }
-
-  if (!student.whatsapp_phone) {
-    throw new Error('לא הוגדר מספר WhatsApp לתלמיד.')
-  }
-
-  const { data: activeAssignment, error: assignmentError } = await supabase
-    .from('student_teacher_parasha_assignments')
-    .select('teacher_parasha_id')
-    .eq('student_id', studentId)
-    .eq('status', 'active')
-    .maybeSingle()
-
-  if (assignmentError) {
-    throw new Error(assignmentError.message)
-  }
-
-  if (!activeAssignment?.teacher_parasha_id) {
-    throw new Error('אין לתלמיד ספריית פרשה פעילה לשליחה.')
-  }
-
-  const { data: groups, error: groupsError } = await supabase
-    .from('lesson_groups')
-    .select('id, section_id, sections(name, order_index)')
-    .eq('teacher_parasha_id', activeAssignment.teacher_parasha_id)
-
-  if (groupsError) {
-    throw new Error(groupsError.message)
-  }
-
-  const lessonGroups = (groups ?? []) as Array<{
-    id: number
-    section_id: number
-    sections: { name: string; order_index: number } | { name: string; order_index: number }[] | null
-  }>
-
-  if (lessonGroups.length === 0) {
-    throw new Error('אין עדיין קבוצות שיעור מוכנות לתלמיד זה.')
-  }
-
-  const groupIds = lessonGroups.map((group) => group.id)
-  const { data: parts, error: partsError } = await supabase
-    .from('lesson_parts')
-    .select('id, lesson_group_id, name, part_order, is_visible_to_student, completion_target, audio_url, video_url, media_kind')
-    .in('lesson_group_id', groupIds)
-
-  if (partsError) {
-    throw new Error(partsError.message)
-  }
-
-  const lessonParts = (parts ?? []) as Array<{
-    id: number
-    lesson_group_id: number
-    name: string
-    part_order: number
-    is_visible_to_student: boolean | null
-    completion_target: number | null
-    audio_url: string | null
-    video_url: string | null
-    media_kind?: string | null
-  }>
-
-  if (lessonParts.length === 0) {
-    throw new Error('אין עדיין תתי־חלקים מוכנים לתלמיד זה.')
-  }
-
-  const partIds = lessonParts.map((part) => part.id)
-  const [
-    { data: slideRows, error: slidesError },
-    { data: settingRows, error: settingsError },
-    { data: practiceRows, error: practiceError },
-  ] = await Promise.all([
-    supabase.from('lesson_slides').select('lesson_part_id').in('lesson_part_id', partIds),
-    supabase
-      .from('student_lesson_part_settings')
-      .select('lesson_part_id, is_visible_to_student')
-      .eq('student_id', studentId)
-      .in('lesson_part_id', partIds),
-    supabase
-      .from('practice_events')
-      .select('lesson_part_id, completed')
-      .eq('student_id', studentId)
-      .in('lesson_part_id', partIds),
-  ])
-
-  if (slidesError || settingsError || practiceError) {
-    throw new Error(slidesError?.message ?? settingsError?.message ?? practiceError?.message ?? 'שגיאה בטעינת נתוני WhatsApp.')
-  }
-
-  const slideCountByPartId = new Map<number, number>()
-  for (const row of (slideRows ?? []) as Array<{ lesson_part_id: number }>) {
-    slideCountByPartId.set(row.lesson_part_id, (slideCountByPartId.get(row.lesson_part_id) ?? 0) + 1)
-  }
-
-  const visibilityByPartId = new Map<number, boolean>(
-    ((settingRows ?? []) as Array<{ lesson_part_id: number; is_visible_to_student: boolean }>).map((row) => [
-      row.lesson_part_id,
-      row.is_visible_to_student,
-    ])
-  )
-
-  const completedCountByPartId = new Map<number, number>()
-  for (const row of (practiceRows ?? []) as Array<{ lesson_part_id: number; completed: boolean }>) {
-    if (row.completed) {
-      completedCountByPartId.set(
-        row.lesson_part_id,
-        (completedCountByPartId.get(row.lesson_part_id) ?? 0) + 1
-      )
+    if (!studentId) {
+      throw new Error('חסר מזהה תלמיד לשליחת הודעת WhatsApp.')
     }
-  }
 
-  const groupMetaById = new Map(
-    lessonGroups.map((group) => {
-      const section = Array.isArray(group.sections) ? group.sections[0] : group.sections
-      return [
-        group.id,
-        {
-          sectionName: section?.name ?? 'ללא חלק',
-          orderIndex: section?.order_index ?? 0,
-        },
-      ]
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .select('id, admin_id, name, whatsapp_phone, torah_reading_date')
+      .eq('id', studentId)
+      .maybeSingle()
+
+    if (studentError || !student) {
+      throw new Error(studentError?.message ?? 'התלמיד לא נמצא.')
+    }
+
+    if (session.role !== 'primary' && student.admin_id !== session.id) {
+      throw new Error('אין הרשאה לשלוח הודעת WhatsApp לתלמיד זה.')
+    }
+
+    if (!student.whatsapp_phone) {
+      throw new Error('לא הוגדר מספר WhatsApp לתלמיד.')
+    }
+
+    const { data: activeAssignment, error: assignmentError } = await supabase
+      .from('student_teacher_parasha_assignments')
+      .select('teacher_parasha_id')
+      .eq('student_id', studentId)
+      .eq('status', 'active')
+      .maybeSingle()
+
+    if (assignmentError) {
+      throw new Error(assignmentError.message)
+    }
+
+    if (!activeAssignment?.teacher_parasha_id) {
+      throw new Error('אין לתלמיד ספריית פרשה פעילה לשליחה.')
+    }
+
+    const { data: groups, error: groupsError } = await supabase
+      .from('lesson_groups')
+      .select('id, section_id, sections(name, order_index)')
+      .eq('teacher_parasha_id', activeAssignment.teacher_parasha_id)
+
+    if (groupsError) {
+      throw new Error(groupsError.message)
+    }
+
+    const lessonGroups = (groups ?? []) as Array<{
+      id: number
+      section_id: number
+      sections: { name: string; order_index: number } | { name: string; order_index: number }[] | null
+    }>
+
+    if (lessonGroups.length === 0) {
+      throw new Error('אין עדיין קבוצות שיעור מוכנות לתלמיד זה.')
+    }
+
+    const groupIds = lessonGroups.map((group) => group.id)
+    const { data: parts, error: partsError } = await supabase
+      .from('lesson_parts')
+      .select('id, lesson_group_id, name, part_order, is_visible_to_student, completion_target, audio_url, video_url, media_kind')
+      .in('lesson_group_id', groupIds)
+
+    if (partsError) {
+      throw new Error(partsError.message)
+    }
+
+    const lessonParts = (parts ?? []) as Array<{
+      id: number
+      lesson_group_id: number
+      name: string
+      part_order: number
+      is_visible_to_student: boolean | null
+      completion_target: number | null
+      audio_url: string | null
+      video_url: string | null
+      media_kind?: string | null
+    }>
+
+    if (lessonParts.length === 0) {
+      throw new Error('אין עדיין תתי־חלקים מוכנים לתלמיד זה.')
+    }
+
+    const partIds = lessonParts.map((part) => part.id)
+    const [
+      { data: slideRows, error: slidesError },
+      { data: settingRows, error: settingsError },
+      { data: practiceRows, error: practiceError },
+    ] = await Promise.all([
+      supabase.from('lesson_slides').select('lesson_part_id').in('lesson_part_id', partIds),
+      supabase
+        .from('student_lesson_part_settings')
+        .select('lesson_part_id, is_visible_to_student')
+        .eq('student_id', studentId)
+        .in('lesson_part_id', partIds),
+      supabase
+        .from('practice_events')
+        .select('lesson_part_id, completed')
+        .eq('student_id', studentId)
+        .in('lesson_part_id', partIds),
+    ])
+
+    if (slidesError || settingsError || practiceError) {
+      throw new Error(slidesError?.message ?? settingsError?.message ?? practiceError?.message ?? 'שגיאה בטעינת נתוני WhatsApp.')
+    }
+
+    const slideCountByPartId = new Map<number, number>()
+    for (const row of (slideRows ?? []) as Array<{ lesson_part_id: number }>) {
+      slideCountByPartId.set(row.lesson_part_id, (slideCountByPartId.get(row.lesson_part_id) ?? 0) + 1)
+    }
+
+    const visibilityByPartId = new Map<number, boolean>(
+      ((settingRows ?? []) as Array<{ lesson_part_id: number; is_visible_to_student: boolean }>).map((row) => [
+        row.lesson_part_id,
+        row.is_visible_to_student,
+      ])
+    )
+
+    const completedCountByPartId = new Map<number, number>()
+    for (const row of (practiceRows ?? []) as Array<{ lesson_part_id: number; completed: boolean }>) {
+      if (row.completed) {
+        completedCountByPartId.set(
+          row.lesson_part_id,
+          (completedCountByPartId.get(row.lesson_part_id) ?? 0) + 1
+        )
+      }
+    }
+
+    const groupMetaById = new Map(
+      lessonGroups.map((group) => {
+        const section = Array.isArray(group.sections) ? group.sections[0] : group.sections
+        return [
+          group.id,
+          {
+            sectionName: section?.name ?? 'ללא חלק',
+            orderIndex: section?.order_index ?? 0,
+          },
+        ]
+      })
+    )
+
+    const readyParts = lessonParts
+      .filter((part) => {
+        const visible =
+          (part.is_visible_to_student ?? true) &&
+          (visibilityByPartId.get(part.id) ?? true)
+        if (!visible) {
+          return false
+        }
+
+        const mediaKind = part.media_kind === 'video' || part.video_url ? 'video' : 'audio_slides'
+        if (mediaKind === 'video') {
+          return Boolean(part.video_url)
+        }
+
+        return Boolean(part.audio_url) && (slideCountByPartId.get(part.id) ?? 0) > 0
+      })
+      .sort((left, right) => {
+        const leftGroup = groupMetaById.get(left.lesson_group_id)
+        const rightGroup = groupMetaById.get(right.lesson_group_id)
+        if ((leftGroup?.orderIndex ?? 0) !== (rightGroup?.orderIndex ?? 0)) {
+          return (leftGroup?.orderIndex ?? 0) - (rightGroup?.orderIndex ?? 0)
+        }
+        if (left.part_order !== right.part_order) {
+          return left.part_order - right.part_order
+        }
+        return left.id - right.id
+      })
+
+    if (readyParts.length === 0) {
+      throw new Error('אין עדיין תתי־חלקים זמינים ומוכנים ל-WhatsApp עבור תלמיד זה.')
+    }
+
+    const recommendedPart =
+      readyParts.find(
+        (part) => (completedCountByPartId.get(part.id) ?? 0) < Math.max(part.completion_target ?? 3, 1)
+      ) ?? readyParts[0]
+
+    const chosenPart = requestedLessonPartId
+      ? readyParts.find((part) => part.id === requestedLessonPartId) ?? null
+      : null
+
+    if (requestedLessonPartId && !chosenPart) {
+      throw new Error('הקטע שבחרת עדיין לא פתוח לתלמיד או שחסרה לו מדיה מוכנה לשליחה.')
+    }
+
+    const selectedPart = chosenPart ?? recommendedPart
+
+    const groupMeta = groupMetaById.get(selectedPart.lesson_group_id)
+    const lessonLink = await createStudentDirectAccessLink({
+      studentId: student.id,
+      lessonPartId: selectedPart.id,
+      adminId: session.id ?? student.admin_id ?? null,
     })
-  )
-
-  const readyParts = lessonParts
-    .filter((part) => {
-      const visible =
-        (part.is_visible_to_student ?? true) &&
-        (visibilityByPartId.get(part.id) ?? true)
-      if (!visible) {
-        return false
-      }
-
-      const mediaKind = part.media_kind === 'video' || part.video_url ? 'video' : 'audio_slides'
-      if (mediaKind === 'video') {
-        return Boolean(part.video_url)
-      }
-
-      return Boolean(part.audio_url) && (slideCountByPartId.get(part.id) ?? 0) > 0
-    })
-    .sort((left, right) => {
-      const leftGroup = groupMetaById.get(left.lesson_group_id)
-      const rightGroup = groupMetaById.get(right.lesson_group_id)
-      if ((leftGroup?.orderIndex ?? 0) !== (rightGroup?.orderIndex ?? 0)) {
-        return (leftGroup?.orderIndex ?? 0) - (rightGroup?.orderIndex ?? 0)
-      }
-      if (left.part_order !== right.part_order) {
-        return left.part_order - right.part_order
-      }
-      return left.id - right.id
+    const messageText = buildPracticeReminderText({
+      studentName: student.name,
+      sectionName: groupMeta?.sectionName ?? 'הקטע הבא',
+      partName: selectedPart.name,
+      daysUntilReading: getDaysUntilReading(student.torah_reading_date),
+      lessonLink,
     })
 
-  if (readyParts.length === 0) {
-    throw new Error('אין עדיין תתי־חלקים זמינים ומוכנים ל-WhatsApp עבור תלמיד זה.')
+    const sendResult = await sendWhatsAppTextMessage({
+      to: sanitizePhoneNumber(student.whatsapp_phone),
+      body: messageText,
+    })
+
+    const supabaseAdmin =
+      getSupabaseAdmin() as unknown as WhatsAppMessagesAdminClient
+    const { error: logError } = await supabaseAdmin.from('whatsapp_messages').insert({
+      student_id: student.id,
+      admin_id: session.id ?? student.admin_id,
+      lesson_part_id: selectedPart.id,
+      message_type: 'practice_reminder',
+      recipient_phone: sanitizePhoneNumber(student.whatsapp_phone),
+      message_text: messageText,
+      lesson_link: lessonLink,
+      external_message_id: sendResult.messageId,
+      status: 'sent',
+      provider_response: sendResult.responseBody,
+    })
+
+    if (logError) {
+      throw new Error(logError.message)
+    }
+
+    revalidatePath('/admin')
+    redirect(
+      buildAdminActionRedirectPath({
+        returnPath,
+        status: 'success',
+        message: `תזכורת נשלחה עבור ${selectedPart.name}.`,
+      })
+    )
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw error
+    }
+
+    const message = error instanceof Error ? error.message : 'שליחת ההודעה נכשלה.'
+    redirect(
+      buildAdminActionRedirectPath({
+        returnPath,
+        status: 'error',
+        message,
+      })
+    )
   }
-
-  const recommendedPart =
-    readyParts.find(
-      (part) => (completedCountByPartId.get(part.id) ?? 0) < Math.max(part.completion_target ?? 3, 1)
-    ) ?? readyParts[0]
-
-  const chosenPart = requestedLessonPartId
-    ? readyParts.find((part) => part.id === requestedLessonPartId) ?? null
-    : null
-
-  if (requestedLessonPartId && !chosenPart) {
-    throw new Error('הקטע שבחרת עדיין לא פתוח לתלמיד או שחסרה לו מדיה מוכנה לשליחה.')
-  }
-
-  const selectedPart = chosenPart ?? recommendedPart
-
-  const groupMeta = groupMetaById.get(selectedPart.lesson_group_id)
-  const lessonLink = await createStudentDirectAccessLink({
-    studentId: student.id,
-    lessonPartId: selectedPart.id,
-    adminId: session.id ?? student.admin_id ?? null,
-  })
-  const messageText = buildPracticeReminderText({
-    studentName: student.name,
-    sectionName: groupMeta?.sectionName ?? 'הקטע הבא',
-    partName: selectedPart.name,
-    daysUntilReading: getDaysUntilReading(student.torah_reading_date),
-    lessonLink,
-  })
-
-  const sendResult = await sendWhatsAppTextMessage({
-    to: sanitizePhoneNumber(student.whatsapp_phone),
-    body: messageText,
-  })
-
-  const supabaseAdmin =
-    getSupabaseAdmin() as unknown as WhatsAppMessagesAdminClient
-  const { error: logError } = await supabaseAdmin.from('whatsapp_messages').insert({
-    student_id: student.id,
-    admin_id: session.id ?? student.admin_id,
-    lesson_part_id: selectedPart.id,
-    message_type: 'practice_reminder',
-    recipient_phone: sanitizePhoneNumber(student.whatsapp_phone),
-    message_text: messageText,
-    lesson_link: lessonLink,
-    external_message_id: sendResult.messageId,
-    status: 'sent',
-    provider_response: sendResult.responseBody,
-  })
-
-  if (logError) {
-    throw new Error(logError.message)
-  }
-
-  revalidatePath('/admin')
 }
 
 export async function ensureLessonGroup(formData: FormData) {

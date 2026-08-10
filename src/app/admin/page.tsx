@@ -36,6 +36,7 @@ import {
 } from './actions'
 import { AudioDuration } from './audio-duration'
 import { AdminContentSelector, AdminQueryForm } from './selectors'
+import { PendingSubmitButton } from '../../components/pending-submit-button'
 
 type SectionContentSummary = {
   sectionId: number
@@ -142,6 +143,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   const selectedAdminView = toStringParam(resolvedSearchParams.adminView) || 'single'
   const selectedStudentCardId = toNumber(resolvedSearchParams.studentId)
   const selectedAdminCardId = toNumber(resolvedSearchParams.adminId)
+  const whatsappStatus = toStringParam(resolvedSearchParams.waStatus)
+  const whatsappMessage = toStringParam(resolvedSearchParams.waMessage)
 
   const {
     parashot,
@@ -241,6 +244,23 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   const trackingDaysUntil = trackingSummary?.student.torah_reading_date
     ? getDaysUntilReading(trackingSummary.student.torah_reading_date)
     : null
+  const canSendTrackingReminder =
+    Boolean(trackingSummary?.student.whatsapp_phone) &&
+    Boolean(trackingSummary?.whatsappRecommendation)
+  const currentAdminReturnParams = new URLSearchParams()
+  for (const [key, value] of Object.entries(resolvedSearchParams)) {
+    if (key === 'waStatus' || key === 'waMessage') {
+      continue
+    }
+
+    const normalizedValue = Array.isArray(value) ? value[0] : value
+    if (normalizedValue) {
+      currentAdminReturnParams.set(key, normalizedValue)
+    }
+  }
+  const currentAdminReturnPath = currentAdminReturnParams.size > 0
+    ? `/admin?${currentAdminReturnParams.toString()}`
+    : '/admin'
   const teacherParashaStatusCounts = {
     active: teacherParashot.filter((item) => item.status === 'active').length,
     frozen: teacherParashot.filter((item) => item.status === 'frozen').length,
@@ -392,6 +412,17 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             {error.message}
           </div>
         ) : null}
+        {whatsappMessage ? (
+          <div
+            className={`order-2 rounded-2xl p-4 text-sm ring-1 ${
+              whatsappStatus === 'success'
+                ? 'bg-emerald-50 text-emerald-900 ring-emerald-200'
+                : 'bg-rose-50 text-rose-900 ring-rose-200'
+            }`}
+          >
+            {whatsappMessage}
+          </div>
+        ) : null}
 
         <div className="order-4 grid gap-4 md:grid-cols-4">
           <div className="rounded-3xl bg-white p-5 ring-1 ring-slate-200">
@@ -515,17 +546,20 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                       ) : null}
                       <form action={sendStudentWhatsAppPracticeMessage} className="mt-3">
                         <input type="hidden" name="student_id" value={trackingSummary.student.id} />
+                        <input type="hidden" name="return_path" value={currentAdminReturnPath} />
                         <input
                           type="hidden"
                           name="lesson_part_id"
                           value={trackingSummary.whatsappRecommendation.lessonPartId}
                         />
-                        <button
-                          type="submit"
-                          className="w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white"
-                        >
-                          שליחת הודעת WhatsApp
-                        </button>
+                        <PendingSubmitButton
+                          label="שליחת הודעת WhatsApp"
+                          pendingLabel="שולח..."
+                          overlayLabel="שולח תזכורת..."
+                          overlaySubtitle="מכין קישור אישי ושולח אותו לתלמיד"
+                          disabled={!canSendTrackingReminder}
+                          className="w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:cursor-wait disabled:bg-emerald-400"
+                        />
                       </form>
                     </>
                   ) : (
@@ -638,6 +672,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         <td className="px-3 py-3">
                           {(() => {
                             const canSendReminder =
+                              Boolean(trackingSummary.student.whatsapp_phone) &&
                               row.isVisibleToStudent &&
                               (row.mediaKind === 'video'
                                 ? row.hasVideo
@@ -650,18 +685,20 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                               name="student_id"
                               value={trackingSummary.student.id}
                             />
+                            <input type="hidden" name="return_path" value={currentAdminReturnPath} />
                             <input
                               type="hidden"
                               name="lesson_part_id"
                               value={row.lessonPartId}
                             />
-                            <button
-                              type="submit"
+                            <PendingSubmitButton
+                              label={canSendReminder ? 'שלח תזכורת' : 'לא זמין לשליחה'}
+                              pendingLabel="שולח..."
+                              overlayLabel="שולח תזכורת..."
+                              overlaySubtitle={`מכין קישור אישי עבור ${row.partName}`}
                               disabled={!canSendReminder}
                               className="w-full rounded-xl bg-emerald-100 px-3 py-2 text-xs font-semibold text-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
-                            >
-                              {canSendReminder ? 'שלח תזכורת' : 'לא זמין לשליחה'}
-                            </button>
+                            />
                           </form>
                             )
                           })()}

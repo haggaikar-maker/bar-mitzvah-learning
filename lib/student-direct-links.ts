@@ -37,17 +37,13 @@ type StudentAccessLinksAdminClient = {
     insert: (values: StudentAccessLinkInsert) => Promise<{
       error: { message: string } | null
     }>
-    update: (values: { used_at: string }) => {
+    select: (_columns: string) => {
       eq: (_column: 'token_hash', _value: string) => {
-        is: (_column: 'used_at', _value: null) => {
-          gt: (_column: 'expires_at', _value: string) => {
-            select: (_columns: string) => {
-              maybeSingle: () => Promise<{
-                data: StudentAccessLinkRow | null
-                error: { message: string } | null
-              }>
-            }
-          }
+        gt: (_column: 'expires_at', _value: string) => {
+          maybeSingle: () => Promise<{
+            data: StudentAccessLinkRow | null
+            error: { message: string } | null
+          }>
         }
       }
     }
@@ -90,11 +86,9 @@ export async function consumeStudentDirectAccessToken(token: string) {
 
   const { data, error } = await supabaseAdmin
     .from('student_access_links')
-    .update({ used_at: nowIso })
-    .eq('token_hash', tokenHash)
-    .is('used_at', null)
-    .gt('expires_at', nowIso)
     .select('student_id, lesson_part_id')
+    .eq('token_hash', tokenHash)
+    .gt('expires_at', nowIso)
     .maybeSingle()
 
   if (error) {

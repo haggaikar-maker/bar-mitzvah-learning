@@ -895,11 +895,13 @@ export async function getAdminDashboardData(selected?: {
                 .limit(1)
             : Promise.resolve({ data: [], error: null }),
           session?.id
-            ? supabase
+            ? adminClientForWhatsapp
+              ? adminClientForWhatsapp
                 .from('whatsapp_message_templates')
                 .select('template_text')
                 .eq('admin_id', session.id)
                 .maybeSingle()
+              : Promise.resolve({ data: null, error: null })
             : Promise.resolve({ data: null, error: null }),
         ])
 

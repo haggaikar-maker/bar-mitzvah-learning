@@ -67,6 +67,27 @@ type WhatsAppMessagesAdminClient = {
   }
 }
 
+type WhatsAppTemplatesAdminClient = {
+  from: (_table: 'whatsapp_message_templates') => {
+    select: (_columns: string) => {
+      eq: (_column: 'admin_id', _value: number) => {
+        maybeSingle: () => Promise<{
+          data: { template_text?: string | null } | null
+          error: { message: string } | null
+        }>
+      }
+    }
+    upsert: (
+      values: {
+        admin_id: number
+        template_text: string
+        updated_at: string
+      },
+      options: { onConflict: string }
+    ) => Promise<{ error: { message: string } | null }>
+  }
+}
+
 function readNumber(formData: FormData, key: string) {
   const value = readString(formData, key)
   const parsed = Number(value)
@@ -482,9 +503,11 @@ export async function sendStudentWhatsAppPracticeMessage(formData: FormData) {
       throw new Error('לא הוגדר מספר WhatsApp לתלמיד.')
     }
 
+    const supabaseAdminForTemplates =
+      getSupabaseAdmin() as unknown as WhatsAppTemplatesAdminClient
     const { data: templateRow, error: templateError } =
       session.id
-        ? await supabase
+        ? await supabaseAdminForTemplates
             .from('whatsapp_message_templates')
             .select('template_text')
             .eq('admin_id', session.id)
@@ -748,7 +771,9 @@ export async function saveWhatsAppTemplate(formData: FormData) {
     )
   }
 
-  const { error } = await supabase
+  const supabaseAdmin =
+    getSupabaseAdmin() as unknown as WhatsAppTemplatesAdminClient
+  const { error } = await supabaseAdmin
     .from('whatsapp_message_templates')
     .upsert({
       admin_id: session.id,

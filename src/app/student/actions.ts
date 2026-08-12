@@ -6,6 +6,7 @@ import { isLessonPartReady } from '@/lib/lesson-media'
 import { deleteStorageObject, uploadStorageFile } from '@/lib/storage-files'
 import { requireStudentSession } from '@/lib/student-auth'
 import { supabase } from '@/lib/supabase'
+import { refreshStudentWhatsAppCatalog } from '@/lib/whatsapp-bot'
 
 export async function recordPracticeEvent(input: {
   lessonPartId: number
@@ -22,6 +23,8 @@ export async function recordPracticeEvent(input: {
   if (error) {
     throw new Error(error.message)
   }
+
+  await refreshStudentWhatsAppCatalog(session.id)
 
   return event
 }

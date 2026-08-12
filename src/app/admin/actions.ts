@@ -25,7 +25,14 @@ import {
   sanitizePhoneNumber,
   sendWhatsAppTextMessage,
 } from '@/lib/whatsapp'
-import { buildWhatsAppBotMenuText, getStudentWhatsAppCatalog } from '@/lib/whatsapp-bot'
+import {
+  buildWhatsAppBotMenuText,
+  clearStudentWhatsAppCatalog,
+  getStudentWhatsAppCatalog,
+  refreshStudentWhatsAppCatalog,
+  refreshWhatsAppCatalogForLessonPart,
+  refreshWhatsAppCatalogForTeacherParasha,
+} from '@/lib/whatsapp-bot'
 import { getDaysUntilReading } from '@/lib/student-schedule'
 import { createStudentDirectAccessLink } from '@/lib/student-direct-links'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
@@ -210,6 +217,7 @@ async function assignStudentTeacherParashaInternal(input: {
   }
 
   if (!input.teacherParashaId) {
+    await clearStudentWhatsAppCatalog(input.studentId)
     return
   }
 
@@ -225,6 +233,8 @@ async function assignStudentTeacherParashaInternal(input: {
   if (error) {
     throw new Error(error.message)
   }
+
+  await refreshStudentWhatsAppCatalog(input.studentId)
 }
 
 async function saveUploadedFile(
@@ -468,6 +478,7 @@ export async function upsertStudent(formData: FormData) {
       teacherParashaId,
       assignedByAdminId: session.id,
     })
+    await refreshStudentWhatsAppCatalog(studentId)
   }
 
   revalidatePath('/admin')
@@ -935,7 +946,7 @@ export async function upsertLessonPart(formData: FormData) {
     throw new Error('יש להזין שם תת-חלק, סדר ומזהה קבוצה.')
   }
 
-  await getManageableLessonGroup(lessonGroupId, session)
+  const manageableLessonGroup = await getManageableLessonGroup(lessonGroupId, session)
 
   if (completionTarget !== null && completionTarget < 1) {
     throw new Error('יעד ההשלמות חייב להיות לפחות 1.')
@@ -1010,6 +1021,10 @@ export async function upsertLessonPart(formData: FormData) {
     }
   }
 
+  if (manageableLessonGroup.teacher_parasha_id) {
+    await refreshWhatsAppCatalogForTeacherParasha(manageableLessonGroup.teacher_parasha_id)
+  }
+
   revalidatePath('/admin')
   revalidatePath('/student')
 }
@@ -1054,6 +1069,8 @@ export async function resetStudentPartProgress(formData: FormData) {
   if (error) {
     throw new Error(error.message)
   }
+
+  await refreshStudentWhatsAppCatalog(studentId)
 
   revalidatePath('/admin')
   revalidatePath('/student')
@@ -1102,6 +1119,8 @@ export async function updateStudentPartVisibility(formData: FormData) {
 
     throw new Error(error.message)
   }
+
+  await refreshStudentWhatsAppCatalog(studentId)
 
   revalidatePath('/admin')
   revalidatePath('/student')
@@ -1219,6 +1238,8 @@ export async function upsertLessonSlide(formData: FormData) {
     if (error) throw new Error(error.message)
   }
 
+  await refreshWhatsAppCatalogForLessonPart(lessonPartId)
+
   revalidatePath('/admin')
   revalidatePath('/student')
 }
@@ -1235,6 +1256,8 @@ async function assignStudentManagerInternal(input: {
   if (error) {
     throw new Error(error.message)
   }
+
+  await refreshStudentWhatsAppCatalog(input.studentId)
 }
 
 export async function assignStudentManager(formData: FormData) {
@@ -1775,6 +1798,8 @@ export async function copyParashaStructure(formData: FormData) {
       }
     }
 
+    await refreshWhatsAppCatalogForTeacherParasha(targetTeacherParasha.id)
+
     revalidatePath('/admin')
   } catch (error) {
     console.error('copyParashaStructure failed', {
@@ -1814,6 +1839,8 @@ export async function deleteStudent(formData: FormData) {
   const { error } = await supabase.from('students').delete().eq('id', id)
   if (error) throw new Error(error.message)
 
+  await clearStudentWhatsAppCatalog(id)
+
   revalidatePath('/admin')
   revalidatePath('/student')
 }
@@ -1845,10 +1872,16 @@ export async function deleteLessonPart(formData: FormData) {
   const id = readNumber(formData, 'id')
   if (!id) throw new Error('חסר מזהה תת-חלק.')
 
-  await getManageableLessonPart(id, session)
+  const lessonPart = await getManageableLessonPart(id, session)
+  const lessonGroup = await getManageableLessonGroup(lessonPart.lesson_group_id, session)
 
   const { error } = await supabase.from('lesson_parts').delete().eq('id', id)
   if (error) throw new Error(error.message)
+
+  if (lessonGroup.teacher_parasha_id) {
+    await refreshWhatsAppCatalogForTeacherParasha(lessonGroup.teacher_parasha_id)
+  }
+
   revalidatePath('/admin')
   revalidatePath('/student')
 }
@@ -1872,6 +1905,9 @@ export async function deleteLessonSlide(formData: FormData) {
 
   const { error } = await supabase.from('lesson_slides').delete().eq('id', id)
   if (error) throw new Error(error.message)
+
+  await refreshWhatsAppCatalogForLessonPart(slide.lesson_part_id)
+
   revalidatePath('/admin')
   revalidatePath('/student')
 }
@@ -1947,6 +1983,8 @@ export async function upsertTeacherParasha(formData: FormData) {
       .eq('id', id)
 
     if (error) throw new Error(error.message)
+
+    await refreshWhatsAppCatalogForTeacherParasha(id)
   } else {
     const { data: maxVariantRow, error: maxVariantError } = await supabase
       .from('teacher_parashot')
@@ -2010,6 +2048,8 @@ export async function setTeacherParashaStatus(formData: FormData) {
   if (error) {
     throw new Error(error.message)
   }
+
+  await refreshWhatsAppCatalogForTeacherParasha(id)
 
   revalidatePath('/admin')
   revalidatePath('/student')

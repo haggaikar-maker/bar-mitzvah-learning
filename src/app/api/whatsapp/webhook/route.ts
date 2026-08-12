@@ -3,8 +3,8 @@ import {
   buildWhatsAppBotInvalidSelectionText,
   buildWhatsAppBotMenuText,
   buildWhatsAppBotSelectionText,
-  findStudentByWhatsAppPhone,
-  getStudentWhatsAppCatalog,
+  findStudentByWhatsAppPhoneWithSource,
+  getStudentWhatsAppCatalogWithSource,
   parseWhatsAppBotSelection,
 } from '@/lib/whatsapp-bot'
 import { createStudentDirectAccessLink } from '@/lib/student-direct-links'
@@ -98,12 +98,14 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
   })
 
   const findStudentStartedAt = Date.now()
-  const student = await findStudentByWhatsAppPhone(rawPhone)
+  const studentLookup = await findStudentByWhatsAppPhoneWithSource(rawPhone)
+  const student = studentLookup.student
   checkpoints.findStudentMs = Date.now() - findStudentStartedAt
 
   if (!student) {
     console.log('whatsapp webhook student not found', {
       rawPhone,
+      studentLookupSource: studentLookup.source,
       timings: checkpoints,
       totalMs: Date.now() - startedAt,
     })
@@ -113,10 +115,12 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
   console.log('whatsapp webhook matched student', {
     studentId: student.id,
     studentName: student.name,
+    studentLookupSource: studentLookup.source,
   })
 
   const catalogStartedAt = Date.now()
-  const catalog = await getStudentWhatsAppCatalog(student.id)
+  const catalogResult = await getStudentWhatsAppCatalogWithSource(student.id)
+  const catalog = catalogResult.catalog
   checkpoints.getCatalogMs = Date.now() - catalogStartedAt
 
   if (catalog.parts.length === 0) {
@@ -143,6 +147,7 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
 
   console.log('whatsapp webhook parsed selection', {
     studentId: catalog.student.id,
+    catalogSource: catalogResult.source,
     selection,
     availableParts: catalog.parts.map((part, index) => ({
       index: index + 1,
@@ -262,7 +267,7 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
   })
 
   const logStartedAt = Date.now()
-  await logOutgoingBotSelectionMessage({
+  void logOutgoingBotSelectionMessage({
     studentId: catalog.student.id,
     adminId: catalog.student.admin_id ?? null,
     lessonPartId: selectedPart.lessonPartId,
@@ -271,12 +276,16 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
     lessonLink,
     externalMessageId: sendResult.messageId,
     providerResponse: sendResult.responseBody,
+  }).catch((error) => {
+    console.error('Failed to enqueue bot selection log', error)
   })
   checkpoints.logMessageMs = Date.now() - logStartedAt
 
   console.log('whatsapp webhook handled student message', {
     studentId: catalog.student.id,
     lessonPartId: selectedPart.lessonPartId,
+    studentLookupSource: studentLookup.source,
+    catalogSource: catalogResult.source,
     timings: checkpoints,
     totalMs: Date.now() - startedAt,
   })

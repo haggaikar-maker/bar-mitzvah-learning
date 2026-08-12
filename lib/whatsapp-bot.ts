@@ -35,6 +35,16 @@ export type StudentWhatsAppCatalog = {
   recommendedPart: StudentWhatsAppCatalogPart | null
 }
 
+export type StudentWhatsAppLookupResult = {
+  student: StudentWhatsAppCatalogStudent | null
+  source: 'cache' | 'fallback'
+}
+
+export type StudentWhatsAppCatalogResult = {
+  catalog: StudentWhatsAppCatalog
+  source: 'cache' | 'fallback'
+}
+
 type StudentWhatsAppCatalogStateRow = {
   student_id: number
   admin_id: number | null
@@ -557,11 +567,21 @@ async function loadCachedStudentWhatsAppCatalog(studentId: number) {
     'student_whatsapp_catalog_items'
   ) as unknown as CacheItemsTableClient
 
-  const { data: stateRow, error: stateError } = await cacheStateTable.select(
+  const statePromise = cacheStateTable.select(
       'student_id, admin_id, student_name, whatsapp_phone, whatsapp_phone_normalized, torah_reading_date, active_teacher_parasha_id, available_part_count, recommended_lesson_part_id'
     )
     .eq('student_id', studentId)
     .maybeSingle()
+  const itemsPromise = cacheItemsTable.select(
+      'student_id, active_teacher_parasha_id, lesson_part_id, lesson_group_id, display_index, section_name, section_order_index, part_name, part_order, completion_target, completed_count, media_kind, media_url, audio_url, video_url, slide_count, is_recommended'
+    )
+    .eq('student_id', studentId)
+    .order('display_index', { ascending: true })
+
+  const [
+    { data: stateRow, error: stateError },
+    { data: itemRows, error: itemsError },
+  ] = await Promise.all([statePromise, itemsPromise])
 
   if (stateError) {
     if (isWhatsAppCatalogCacheMissingError(stateError.message)) {
@@ -577,6 +597,14 @@ async function loadCachedStudentWhatsAppCatalog(studentId: number) {
 
   const state = stateRow as StudentWhatsAppCatalogStateRow
 
+  if (itemsError) {
+    if (isWhatsAppCatalogCacheMissingError(itemsError.message)) {
+      return null
+    }
+
+    throw new Error(itemsError.message)
+  }
+
   if (!state.active_teacher_parasha_id) {
     return {
       student: {
@@ -590,20 +618,6 @@ async function loadCachedStudentWhatsAppCatalog(studentId: number) {
       parts: [],
       recommendedPart: null,
     }
-  }
-
-  const { data: itemRows, error: itemsError } = await cacheItemsTable.select(
-      'student_id, active_teacher_parasha_id, lesson_part_id, lesson_group_id, display_index, section_name, section_order_index, part_name, part_order, completion_target, completed_count, media_kind, media_url, audio_url, video_url, slide_count, is_recommended'
-    )
-    .eq('student_id', studentId)
-    .order('display_index', { ascending: true })
-
-  if (itemsError) {
-    if (isWhatsAppCatalogCacheMissingError(itemsError.message)) {
-      return null
-    }
-
-    throw new Error(itemsError.message)
   }
 
   const items = ((itemRows ?? []) as StudentWhatsAppCatalogItemRow[]).map((row) => ({
@@ -719,10 +733,20 @@ export async function refreshWhatsAppCatalogForLessonPart(lessonPartId: number) 
 }
 
 export async function findStudentByWhatsAppPhone(rawPhone: string) {
+  const result = await findStudentByWhatsAppPhoneWithSource(rawPhone)
+  return result.student
+}
+
+export async function findStudentByWhatsAppPhoneWithSource(
+  rawPhone: string
+): Promise<StudentWhatsAppLookupResult> {
   const normalizedPhone = sanitizePhoneNumber(rawPhone)
 
   if (!normalizedPhone) {
-    return null
+    return {
+      student: null,
+      source: 'fallback',
+    }
   }
 
   const supabaseAdmin = getSupabaseAdmin()
@@ -748,12 +772,15 @@ export async function findStudentByWhatsAppPhone(rawPhone: string) {
     }
 
     return {
-      id: state.student_id,
-      admin_id: state.admin_id,
-      name: state.student_name,
-      whatsapp_phone: state.whatsapp_phone,
-      torah_reading_date: state.torah_reading_date,
-    } satisfies StudentWhatsAppCatalogStudent
+      student: {
+        id: state.student_id,
+        admin_id: state.admin_id,
+        name: state.student_name,
+        whatsapp_phone: state.whatsapp_phone,
+        torah_reading_date: state.torah_reading_date,
+      } satisfies StudentWhatsAppCatalogStudent,
+      source: 'cache',
+    }
   }
 
   const { data, error } = await supabaseAdmin
@@ -771,13 +798,23 @@ export async function findStudentByWhatsAppPhone(rawPhone: string) {
     null
 
   if (student) {
-    await refreshStudentWhatsAppCatalog(student.id).catch(() => undefined)
+    void refreshStudentWhatsAppCatalog(student.id).catch(() => undefined)
   }
 
-  return student
+  return {
+    student,
+    source: 'fallback',
+  }
 }
 
 export async function getStudentWhatsAppCatalog(studentId: number) {
+  const result = await getStudentWhatsAppCatalogWithSource(studentId)
+  return result.catalog
+}
+
+export async function getStudentWhatsAppCatalogWithSource(
+  studentId: number
+): Promise<StudentWhatsAppCatalogResult> {
   const cachedCatalog = await loadCachedStudentWhatsAppCatalog(studentId)
 
   if (cachedCatalog) {
@@ -785,12 +822,18 @@ export async function getStudentWhatsAppCatalog(studentId: number) {
       throw new Error('אין לתלמיד ספריית פרשה פעילה לשליחה.')
     }
 
-    return cachedCatalog
+    return {
+      catalog: cachedCatalog,
+      source: 'cache',
+    }
   }
 
   const snapshot = await buildStudentWhatsAppCatalogSnapshot(studentId)
-  await persistStudentWhatsAppCatalog(snapshot)
-  return snapshot
+  void persistStudentWhatsAppCatalog(snapshot).catch(() => undefined)
+  return {
+    catalog: snapshot,
+    source: 'fallback',
+  }
 }
 
 export function buildWhatsAppBotMenuText(input: {

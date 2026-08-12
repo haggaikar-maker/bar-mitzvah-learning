@@ -97,6 +97,13 @@ export async function sendWhatsAppTextMessage(input: WhatsAppTextSendInput) {
   const phoneNumberId = getRequiredEnv('WHATSAPP_PHONE_NUMBER_ID')
   const version = process.env.WHATSAPP_API_VERSION ?? 'v23.0'
   const endpoint = `https://graph.facebook.com/${version}/${phoneNumberId}/messages`
+  const startedAt = Date.now()
+
+  console.log('whatsapp send start', {
+    to: sanitizePhoneNumber(input.to),
+    bodyLength: input.body.length,
+    endpoint,
+  })
 
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -117,6 +124,8 @@ export async function sendWhatsAppTextMessage(input: WhatsAppTextSendInput) {
     cache: 'no-store',
   })
 
+  const responseMs = Date.now() - startedAt
+
   const responseBody = (await response.json().catch(() => null)) as
     | {
         error?: {
@@ -127,11 +136,24 @@ export async function sendWhatsAppTextMessage(input: WhatsAppTextSendInput) {
     | null
 
   if (!response.ok) {
+    console.error('whatsapp send failed', {
+      to: sanitizePhoneNumber(input.to),
+      status: response.status,
+      responseMs,
+      errorMessage: responseBody?.error?.message ?? null,
+    })
     throw new Error(
       responseBody?.error?.message ??
         `שליחת ההודעה ל-WhatsApp נכשלה עם קוד ${response.status}.`
     )
   }
+
+  console.log('whatsapp send success', {
+    to: sanitizePhoneNumber(input.to),
+    status: response.status,
+    responseMs,
+    messageId: responseBody?.messages?.[0]?.id ?? null,
+  })
 
   return {
     messageId: responseBody?.messages?.[0]?.id ?? null,

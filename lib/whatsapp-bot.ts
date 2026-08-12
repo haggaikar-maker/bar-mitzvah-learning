@@ -321,21 +321,15 @@ export function buildWhatsAppBotSelectionText(input: {
   part: StudentWhatsAppCatalogPart
   lessonLink: string
 }) {
-  const lines = [
+  return [
     `שלום ${input.studentName}`,
     `בחרת: ${input.part.sectionName} - ${input.part.partName}`,
     '',
     'קישור ישיר לקטע באתר:',
     input.lessonLink,
   ]
-
-  if (input.part.videoUrl) {
-    lines.push('', 'קישור ישיר לוידאו:', input.part.videoUrl)
-  } else if (input.part.audioUrl) {
-    lines.push('', 'קישור ישיר לאודיו:', input.part.audioUrl)
-  }
-
-  return lines.join('\n').trim()
+    .join('\n')
+    .trim()
 }
 
 export function buildWhatsAppBotInvalidSelectionText(input: {

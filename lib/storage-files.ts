@@ -26,7 +26,13 @@ export function normalizePublicPath(value: string) {
     return ''
   }
 
-  const normalized = value
+  const trimmed = value.trim()
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed
+  }
+
+  const normalized = trimmed
     .replaceAll('\\', '/')
     .replace(/^public\//i, '')
     .replace(/^\/+/, '')
@@ -121,4 +127,3 @@ export async function deleteStorageObject(kind: StorageKind, objectPath: string)
     throw new Error(`שגיאה במחיקת קובץ מהאחסון: ${error.message}`)
   }
 }
-

@@ -65,6 +65,7 @@ export type ParashaSource = {
   username?: string
   displayName: string
   internalDisplayName: string
+  parashaName: string
   nusachName?: string
   importablePartCount: number
   importableParts: ParashaSourcePart[]
@@ -559,7 +560,6 @@ export async function getAdminDashboardData(selected?: {
   if (selectedTeacherParasha) {
     const relevantSources = allTeacherParashot.filter(
       (item) =>
-        item.parasha_id === selectedTeacherParasha.parasha_id &&
         item.nusach_id === selectedTeacherParasha.nusach_id &&
         item.id !== selectedTeacherParasha.id
     )
@@ -752,6 +752,7 @@ export async function getAdminDashboardData(selected?: {
               username: usernameByAdminId.get(source.owner_admin_id),
               displayName: source.owner_display_name,
               internalDisplayName: source.internal_display_name,
+              parashaName: source.parasha_name,
               nusachName: source.nusach_name,
               importablePartCount: importableParts.length,
               importableParts,
@@ -766,6 +767,20 @@ export async function getAdminDashboardData(selected?: {
             }
           })
           .filter((source) => source.importablePartCount > 0)
+          .sort((left, right) => {
+            if (left.parashaName !== right.parashaName) {
+              return left.parashaName.localeCompare(right.parashaName, 'he')
+            }
+
+            if (left.displayName !== right.displayName) {
+              return left.displayName.localeCompare(right.displayName, 'he')
+            }
+
+            return left.internalDisplayName.localeCompare(
+              right.internalDisplayName,
+              'he'
+            )
+          })
       }
     }
   }

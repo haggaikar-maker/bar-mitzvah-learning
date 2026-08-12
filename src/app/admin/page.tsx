@@ -278,7 +278,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   const allImportableSourceParts = parashaSources.flatMap((source) =>
     source.importableParts.map((part) => ({
       ...part,
-      sourceLabel: `${source.displayName} | ${part.sectionName} | ${part.partName}`,
+      sourceLabel: `${source.parashaName} | ${source.displayName} | ${part.sectionName} | ${part.partName}`,
       teacherParashaId: source.teacherParashaId,
     }))
   )
@@ -1638,6 +1638,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 </h3>
                 <p className="mt-2 text-sm text-slate-600">
                   אפשר לייבא את כל המבנה של ספריית מקור או לבחור תת־חלק יחיד בלבד.
+                  כעת אפשר לבחור מקור מכל פרשה אחרת, כל עוד הוא באותו נוסח קריאה.
                   המערכת מציגה רק תתי־חלקים שבאמת מוכנים לייבוא: וידאו קיים, או אודיו עם לפחות שקופית אחת.
                 </p>
                 <form action={copyParashaStructure} className="mt-4 grid gap-3">
@@ -1658,7 +1659,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     <option value="">בחר פרשת מקור</option>
                     {parashaSources.map((source) => (
                       <option key={source.teacherParashaId} value={source.teacherParashaId}>
-                        {source.internalDisplayName} | {source.displayName}{source.nusachName ? ` | ${source.nusachName}` : ''} | {source.importablePartCount} תתי־חלקים
+                        {source.parashaName} | {source.internalDisplayName} | {source.displayName}{source.nusachName ? ` | ${source.nusachName}` : ''} | {source.importablePartCount} תתי־חלקים
                       </option>
                     ))}
                   </select>
@@ -1690,7 +1691,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               </div>
 
               <div className="rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <h3 className="text-lg font-semibold text-slate-900">מנהלים עם אותה פרשה</h3>
+                <h3 className="text-lg font-semibold text-slate-900">ספריות מקור זמינות לייבוא</h3>
                 {parashaSources.length > 0 ? (
                   <div className="mt-4 space-y-3">
                     {parashaSources.map((source) => (
@@ -1699,7 +1700,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-700 ring-1 ring-slate-200"
                       >
                         <div className="font-semibold text-slate-900">
-                          {source.internalDisplayName}
+                          {source.parashaName} | {source.internalDisplayName}
                         </div>
                         <div className="mt-1 text-xs text-slate-500">
                           {source.displayName}{source.nusachName ? ` | ${source.nusachName}` : ''} | {source.importablePartCount} תתי־חלקים מוכנים
@@ -1720,7 +1721,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   </div>
                 ) : (
                   <p className="mt-3 text-sm text-slate-500">
-                    עדיין אין מנהל אחר שבנה את הפרשה הזאת.
+                    עדיין אין ספריות מקור אחרות באותו נוסח עם תתי־חלקים מוכנים לייבוא.
                   </p>
                 )}
               </div>

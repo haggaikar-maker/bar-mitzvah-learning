@@ -83,16 +83,29 @@ async function logOutgoingBotSelectionMessage(input: {
 }
 
 async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) {
+  const startedAt = Date.now()
+  const checkpoints = {
+    findStudentMs: 0,
+    getCatalogMs: 0,
+    createLinkMs: 0,
+    sendMessageMs: 0,
+    logMessageMs: 0,
+  }
+
   console.log('whatsapp webhook incoming text', {
     rawPhone,
     bodyText,
   })
 
+  const findStudentStartedAt = Date.now()
   const student = await findStudentByWhatsAppPhone(rawPhone)
+  checkpoints.findStudentMs = Date.now() - findStudentStartedAt
 
   if (!student) {
     console.log('whatsapp webhook student not found', {
       rawPhone,
+      timings: checkpoints,
+      totalMs: Date.now() - startedAt,
     })
     return
   }
@@ -102,7 +115,9 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
     studentName: student.name,
   })
 
+  const catalogStartedAt = Date.now()
   const catalog = await getStudentWhatsAppCatalog(student.id)
+  checkpoints.getCatalogMs = Date.now() - catalogStartedAt
 
   if (catalog.parts.length === 0) {
     console.log('whatsapp webhook empty catalog', {
@@ -115,8 +130,11 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
       to: rawPhone,
       body: buildWhatsAppBotEmptyCatalogText(catalog.student.name),
     })
+    checkpoints.sendMessageMs = Date.now() - catalogStartedAt - checkpoints.getCatalogMs
     console.log('whatsapp webhook sent empty catalog response', {
       to: rawPhone,
+      timings: checkpoints,
+      totalMs: Date.now() - startedAt,
     })
     return
   }
@@ -149,6 +167,8 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
     console.log('whatsapp webhook sent menu response', {
       studentId: catalog.student.id,
       to: rawPhone,
+      timings: checkpoints,
+      totalMs: Date.now() - startedAt,
     })
     return
   }
@@ -168,6 +188,8 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
     console.log('whatsapp webhook sent invalid selection response', {
       studentId: catalog.student.id,
       to: rawPhone,
+      timings: checkpoints,
+      totalMs: Date.now() - startedAt,
     })
     return
   }
@@ -194,6 +216,8 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
     console.log('whatsapp webhook sent out-of-range selection response', {
       studentId: catalog.student.id,
       to: rawPhone,
+      timings: checkpoints,
+      totalMs: Date.now() - startedAt,
     })
     return
   }
@@ -205,11 +229,13 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
     partName: selectedPart.partName,
   })
 
+  const createLinkStartedAt = Date.now()
   const lessonLink = await createStudentDirectAccessLink({
     studentId: catalog.student.id,
     lessonPartId: selectedPart.lessonPartId,
     adminId: catalog.student.admin_id ?? null,
   })
+  checkpoints.createLinkMs = Date.now() - createLinkStartedAt
 
   const responseText = buildWhatsAppBotSelectionText({
     studentName: catalog.student.name,
@@ -222,10 +248,12 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
     lessonPartId: selectedPart.lessonPartId,
     to: rawPhone,
   })
+  const sendStartedAt = Date.now()
   const sendResult = await sendWhatsAppTextMessage({
     to: rawPhone,
     body: responseText,
   })
+  checkpoints.sendMessageMs = Date.now() - sendStartedAt
   console.log('whatsapp webhook sent selected part response', {
     studentId: catalog.student.id,
     lessonPartId: selectedPart.lessonPartId,
@@ -233,6 +261,7 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
     messageId: sendResult.messageId,
   })
 
+  const logStartedAt = Date.now()
   await logOutgoingBotSelectionMessage({
     studentId: catalog.student.id,
     adminId: catalog.student.admin_id ?? null,
@@ -242,6 +271,14 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
     lessonLink,
     externalMessageId: sendResult.messageId,
     providerResponse: sendResult.responseBody,
+  })
+  checkpoints.logMessageMs = Date.now() - logStartedAt
+
+  console.log('whatsapp webhook handled student message', {
+    studentId: catalog.student.id,
+    lessonPartId: selectedPart.lessonPartId,
+    timings: checkpoints,
+    totalMs: Date.now() - startedAt,
   })
 }
 

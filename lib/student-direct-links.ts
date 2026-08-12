@@ -28,6 +28,7 @@ type StudentAccessLinkInsert = {
 }
 
 type StudentAccessLinkRow = {
+  token_hash?: string
   student_id: number
   lesson_part_id: number
 }
@@ -38,7 +39,22 @@ type StudentAccessLinksAdminClient = {
       error: { message: string } | null
     }>
     select: (_columns: string) => {
-      eq: (_column: 'token_hash', _value: string) => {
+      eq: (_column: 'token_hash' | 'student_id' | 'lesson_part_id', _value: string | number) => {
+        eq: (_column: 'student_id' | 'lesson_part_id', _value: string | number) => {
+          gt: (_column: 'expires_at', _value: string) => {
+            order: (
+              _column: 'created_at',
+              options: { ascending: boolean }
+            ) => {
+              limit: (_value: number) => {
+                maybeSingle: () => Promise<{
+                  data: StudentAccessLinkRow | null
+                  error: { message: string } | null
+                }>
+              }
+            }
+          }
+        }
         gt: (_column: 'expires_at', _value: string) => {
           maybeSingle: () => Promise<{
             data: StudentAccessLinkRow | null
@@ -57,8 +73,26 @@ export async function createStudentDirectAccessLink(input: {
 }) {
   const supabaseAdmin =
     getSupabaseAdmin() as unknown as StudentAccessLinksAdminClient
-  const rawToken = randomBytes(32).toString('base64url')
-  const tokenHash = hashToken(rawToken)
+  const nowIso = new Date().toISOString()
+  const { data: existingLink, error: existingLinkError } = await supabaseAdmin
+    .from('student_access_links')
+    .select('token_hash, student_id, lesson_part_id')
+    .eq('student_id', input.studentId)
+    .eq('lesson_part_id', input.lessonPartId)
+    .gt('expires_at', nowIso)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (existingLinkError) {
+    throw new Error(existingLinkError.message)
+  }
+
+  if (existingLink?.token_hash) {
+    return `${getMainSiteUrl()}/student/direct/${existingLink.token_hash}`
+  }
+
+  const tokenHash = hashToken(randomBytes(32).toString('base64url'))
   const expiresAt = new Date(
     Date.now() + STUDENT_LINK_TTL_HOURS * 60 * 60 * 1000
   ).toISOString()
@@ -75,13 +109,13 @@ export async function createStudentDirectAccessLink(input: {
     throw new Error(error.message)
   }
 
-  return `${getMainSiteUrl()}/student/direct/${rawToken}`
+  return `${getMainSiteUrl()}/student/direct/${tokenHash}`
 }
 
 export async function consumeStudentDirectAccessToken(token: string) {
   const supabaseAdmin =
     getSupabaseAdmin() as unknown as StudentAccessLinksAdminClient
-  const tokenHash = hashToken(token)
+  const tokenHash = /^[a-f0-9]{64}$/i.test(token) ? token : hashToken(token)
   const nowIso = new Date().toISOString()
 
   const { data, error } = await supabaseAdmin

@@ -37,6 +37,7 @@ import {
   upsertTeacherParasha,
 } from './actions'
 import { AudioDuration } from './audio-duration'
+import { DirectVideoUpload } from './direct-video-upload'
 import { AdminContentSelector, AdminQueryForm } from './selectors'
 import { PendingSubmitButton } from '../../components/pending-submit-button'
 
@@ -2012,20 +2013,13 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                       ) : null}
                       {selectedPartMediaKind === 'video' ? (
                         <>
-                          <label className="grid gap-2 text-sm font-medium text-slate-700">
-                            <span>בחירת קובץ וידאו</span>
-                            <input
-                              name="video_file"
-                              type="file"
-                              accept="video/*"
-                              className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3"
-                            />
-                          </label>
-                          <input
-                            name="video_url"
-                            defaultValue={selectedPart?.video_url ?? ''}
-                            placeholder="https://.../lesson-video.mp4"
-                            className="rounded-2xl border border-slate-200 px-4 py-3"
+                          <DirectVideoUpload
+                            lessonPartId={selectedPart?.id ?? 0}
+                            parashaName={selectedParasha?.name ?? ''}
+                            sectionName={selectedSection?.name ?? ''}
+                            partName={selectedPart?.name ?? ''}
+                            partOrder={selectedPart?.part_order ?? 0}
+                            initialVideoUrl={selectedPart?.video_url ?? ''}
                           />
                         </>
                       ) : (

@@ -1086,18 +1086,31 @@ export function buildWhatsAppBotStatsText(input: {
   studentName: string
   parts: StudentWhatsAppProgressPart[]
 }) {
+  if (input.parts.length === 0) {
+    return [
+      `שלום ${input.studentName}`,
+      'כרגע אין תתי־חלקים להצגת סטטיסטיקה.',
+      '',
+      getBotPromptLine(),
+    ].join('\n')
+  }
+
   const lines = [
     `שלום ${input.studentName}`,
-    'סטטיסטיקת התרגול שלך כרגע:',
-    ...input.parts.map(
-      (part) =>
-        `${part.sectionName} - ${part.partName} | תרגולים: ${part.practiceCount} | השלמות: ${part.completedCount}/${part.completionTarget} | הקלטה: ${part.hasRecording ? 'כן' : 'לא'} | פתוח: ${part.isOpenForPractice ? 'כן' : 'לא'}`
-    ),
+    'הסטטיסטיקה שלך:',
+    ...input.parts.flatMap((part, index) => [
+      `${index + 1}. ${part.sectionName} - ${part.partName}`,
+      `תרגולים: ${part.practiceCount}`,
+      `השלמות: ${part.completedCount}/${part.completionTarget}`,
+      `הקלטה: ${part.hasRecording ? 'יש' : 'אין'}`,
+      `פתוח: ${part.isOpenForPractice ? 'כן' : 'לא'}`,
+      '',
+    ]),
     '',
     getBotPromptLine(),
   ]
 
-  return lines.join('\n').trim()
+  return lines.filter((line, index, all) => !(line === '' && all[index - 1] === '')).join('\n').trim()
 }
 
 export function buildWhatsAppBotTeacherContactPrompt(input: {

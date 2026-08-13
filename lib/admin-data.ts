@@ -54,6 +54,7 @@ export type AdminRecord = {
   username: string
   display_name: string
   role: 'primary' | 'teacher'
+  whatsapp_phone?: string | null
   city?: string | null
   email?: string | null
   status?: string | null
@@ -242,7 +243,7 @@ export async function getAdminDashboardData(selected?: {
   const availableNusachim = (nusachim ?? []) as AdminNusach[]
   const { data: adminsWithContact, error: adminsWithContactError } = await supabase
     .from('admins')
-    .select('id, username, display_name, role, city, email, status')
+    .select('id, username, display_name, role, whatsapp_phone, city, email, status')
     .order('display_name', { ascending: true })
 
   let availableAdmins: AdminRecord[] = []
@@ -262,6 +263,7 @@ export async function getAdminDashboardData(selected?: {
       availableAdmins = ((adminsFallback ?? []) as AdminRecord[]).map((admin) => ({
         ...admin,
         role: admin.role === 'teacher' ? 'teacher' : 'primary',
+        whatsapp_phone: null,
         city: null,
         email: null,
       }))
@@ -273,6 +275,7 @@ export async function getAdminDashboardData(selected?: {
     availableAdmins = ((adminsWithContact ?? []) as AdminRecord[]).map((admin) => ({
       ...admin,
       role: admin.role === 'teacher' ? 'teacher' : 'primary',
+      whatsapp_phone: admin.whatsapp_phone ?? null,
     }))
   }
 

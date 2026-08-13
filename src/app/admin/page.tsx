@@ -870,6 +870,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         className="rounded-2xl border border-slate-200 px-4 py-3"
                       />
                       <input
+                        name="whatsapp_phone"
+                        defaultValue={admin.whatsapp_phone ?? ''}
+                        placeholder="מספר WhatsApp, למשל 9725..."
+                        className="rounded-2xl border border-slate-200 px-4 py-3"
+                      />
+                      <input
                         name="city"
                         defaultValue={admin.city ?? ''}
                         placeholder="עיר / יישוב"
@@ -929,6 +935,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   <input
                     name="username"
                     placeholder="שם משתמש"
+                    className="rounded-2xl border border-slate-200 px-4 py-3"
+                  />
+                  <input
+                    name="whatsapp_phone"
+                    placeholder="מספר WhatsApp, למשל 9725..."
                     className="rounded-2xl border border-slate-200 px-4 py-3"
                   />
                   <input

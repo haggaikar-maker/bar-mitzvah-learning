@@ -1288,6 +1288,7 @@ export async function upsertAdmin(formData: FormData) {
   const id = readNumber(formData, 'id')
   const username = readString(formData, 'username')
   const displayName = readString(formData, 'display_name')
+  const whatsappPhone = readString(formData, 'whatsapp_phone')
   const city = readString(formData, 'city')
   const email = readString(formData, 'email')
   const password = readString(formData, 'password')
@@ -1300,6 +1301,7 @@ export async function upsertAdmin(formData: FormData) {
   const payload: {
     username: string
     display_name: string
+    whatsapp_phone: string | null
     city: string | null
     email: string | null
     role: 'primary' | 'teacher'
@@ -1307,6 +1309,7 @@ export async function upsertAdmin(formData: FormData) {
   } = {
     username,
     display_name: displayName,
+    whatsapp_phone: whatsappPhone || null,
     city: city || null,
     email: email || null,
     role,
@@ -1319,8 +1322,12 @@ export async function upsertAdmin(formData: FormData) {
   if (id) {
     const { error } = await supabase.from('admins').update(payload).eq('id', id)
     if (error) {
-      if (error.message.includes('city') || error.message.includes('email')) {
-        throw new Error('שדות העיר והאימייל עדיין לא קיימים בבסיס הנתונים. צריך להריץ את עדכון ה-SQL החדש.')
+      if (
+        error.message.includes('city') ||
+        error.message.includes('email') ||
+        error.message.includes('whatsapp_phone')
+      ) {
+        throw new Error('שדות הטלפון, העיר והאימייל של המלמדים עדיין לא קיימים בבסיס הנתונים. צריך להריץ את עדכון ה-SQL החדש.')
       }
 
       throw new Error(error.message)
@@ -1332,8 +1339,12 @@ export async function upsertAdmin(formData: FormData) {
 
     const { error } = await supabase.from('admins').insert(payload)
     if (error) {
-      if (error.message.includes('city') || error.message.includes('email')) {
-        throw new Error('שדות העיר והאימייל עדיין לא קיימים בבסיס הנתונים. צריך להריץ את עדכון ה-SQL החדש.')
+      if (
+        error.message.includes('city') ||
+        error.message.includes('email') ||
+        error.message.includes('whatsapp_phone')
+      ) {
+        throw new Error('שדות הטלפון, העיר והאימייל של המלמדים עדיין לא קיימים בבסיס הנתונים. צריך להריץ את עדכון ה-SQL החדש.')
       }
 
       throw new Error(error.message)

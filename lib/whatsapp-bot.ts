@@ -35,6 +35,23 @@ export type StudentWhatsAppCatalog = {
   recommendedPart: StudentWhatsAppCatalogPart | null
 }
 
+export type StudentWhatsAppProgressPart = {
+  lessonPartId: number
+  sectionName: string
+  partName: string
+  practiceCount: number
+  completedCount: number
+  completionTarget: number
+  hasRecording: boolean
+  isOpenForPractice: boolean
+}
+
+export type StudentWhatsAppProgressSummary = {
+  student: StudentWhatsAppCatalogStudent
+  teacherAdminId: number | null
+  parts: StudentWhatsAppProgressPart[]
+}
+
 export type StudentWhatsAppLookupResult = {
   student: StudentWhatsAppCatalogStudent | null
   source: 'cache' | 'fallback'
@@ -171,7 +188,7 @@ type LessonPartTeacherParashaLookupClient = {
 }
 
 function getBotPromptLine() {
-  return 'השב עם מספר הקטע שתרצה לפתוח, או כתוב "תפריט" כדי לקבל שוב את הרשימה.'
+  return 'השב עם מספר הקטע שתרצה לפתוח. 0 או "תפריט" לרשימה הראשית, # לסטטיסטיקה, 99 להודעה למלמד.'
 }
 
 function isReadyForWhatsApp(input: {
@@ -1045,8 +1062,16 @@ export function parseWhatsAppBotSelection(text: string) {
     return null
   }
 
-  if (normalized === 'תפריט' || normalized.toLowerCase() === 'menu') {
+  if (normalized === 'תפריט' || normalized.toLowerCase() === 'menu' || normalized === '0') {
     return 'menu'
+  }
+
+  if (normalized === '#') {
+    return 'stats'
+  }
+
+  if (normalized === '99') {
+    return 'contact_teacher'
   }
 
   if (!/^\d+$/.test(normalized)) {
@@ -1055,4 +1080,346 @@ export function parseWhatsAppBotSelection(text: string) {
 
   const index = Number(normalized)
   return Number.isFinite(index) && index > 0 ? index : null
+}
+
+export function buildWhatsAppBotStatsText(input: {
+  studentName: string
+  parts: StudentWhatsAppProgressPart[]
+}) {
+  const lines = [
+    `שלום ${input.studentName}`,
+    'סטטיסטיקת התרגול שלך כרגע:',
+    ...input.parts.map(
+      (part) =>
+        `${part.sectionName} - ${part.partName} | תרגולים: ${part.practiceCount} | השלמות: ${part.completedCount}/${part.completionTarget} | הקלטה: ${part.hasRecording ? 'כן' : 'לא'} | פתוח: ${part.isOpenForPractice ? 'כן' : 'לא'}`
+    ),
+    '',
+    getBotPromptLine(),
+  ]
+
+  return lines.join('\n').trim()
+}
+
+export function buildWhatsAppBotTeacherContactPrompt(input: {
+  studentName: string
+  teacherName: string
+}) {
+  return [
+    `שלום ${input.studentName}`,
+    `כתוב כאן את ההודעה שתרצה לשלוח למלמד ${input.teacherName}.`,
+    'ההודעה הבאה שתשלח תועבר אליו ישירות.',
+  ].join('\n')
+}
+
+export function buildWhatsAppBotTeacherUnavailableText(studentName: string) {
+  return [
+    `שלום ${studentName}`,
+    'עדיין לא הוגדר למלמד מספר WhatsApp פעיל, ולכן אי אפשר להעביר אליו הודעה כרגע.',
+  ].join('\n')
+}
+
+export function buildWhatsAppBotTeacherMessageSentText(input: {
+  studentName: string
+  teacherName: string
+}) {
+  return [
+    `שלום ${input.studentName}`,
+    `ההודעה נשלחה למלמד ${input.teacherName}.`,
+    'אפשר להמשיך עם 0 לתפריט הראשי.',
+  ].join('\n')
+}
+
+export function buildWhatsAppTeacherInboxText(input: {
+  teacherName: string
+  studentName: string
+  bodyText: string
+}) {
+  return [
+    `שלום ${input.teacherName}`,
+    `התלמיד ${input.studentName} שלח לך הודעה:`,
+    input.bodyText,
+    '',
+    'אפשר להשיב ישירות בהודעה הבאה שלך כאן, והיא תועבר אליו.',
+  ].join('\n')
+}
+
+export function buildWhatsAppTeacherReplySentText(input: {
+  teacherName: string
+  studentName: string
+}) {
+  return [
+    `שלום ${input.teacherName}`,
+    `התגובה נשלחה לתלמיד ${input.studentName}.`,
+  ].join('\n')
+}
+
+export function buildWhatsAppTeacherNoPendingSessionText(teacherName: string) {
+  return [
+    `שלום ${teacherName}`,
+    'כרגע אין הודעה פתוחה מתלמיד שממתינה לתגובה.',
+    'כאשר תלמיד ישלח הודעה דרך 99, אפשר יהיה להשיב לו ישירות מכאן.',
+  ].join('\n')
+}
+
+export async function getStudentWhatsAppProgressSummary(
+  studentId: number
+): Promise<StudentWhatsAppProgressSummary> {
+  const supabaseAdmin = getSupabaseAdmin()
+  const { data: studentRow, error: studentError } = await supabaseAdmin
+    .from('students')
+    .select('id, admin_id, name, whatsapp_phone, torah_reading_date')
+    .eq('id', studentId)
+    .maybeSingle()
+
+  if (studentError || !studentRow) {
+    throw new Error(studentError?.message ?? 'התלמיד לא נמצא.')
+  }
+
+  const student = studentRow as StudentWhatsAppCatalogStudent
+  const { data: activeAssignmentRow, error: assignmentError } = await supabaseAdmin
+    .from('student_teacher_parasha_assignments')
+    .select(
+      `
+        teacher_parasha_id,
+        teacher_parashot (
+          id,
+          owner_admin_id,
+          status
+        )
+      `
+    )
+    .eq('student_id', studentId)
+    .eq('status', 'active')
+    .maybeSingle()
+
+  if (assignmentError) {
+    throw new Error(assignmentError.message)
+  }
+
+  const activeAssignment = activeAssignmentRow as
+    | {
+        teacher_parasha_id: number
+        teacher_parashot:
+          | {
+              id: number
+              owner_admin_id: number | null
+              status: string | null
+            }
+          | Array<{
+              id: number
+              owner_admin_id: number | null
+              status: string | null
+            }>
+          | null
+      }
+    | null
+
+  if (!activeAssignment?.teacher_parasha_id) {
+    return {
+      student,
+      teacherAdminId: student.admin_id ?? null,
+      parts: [],
+    }
+  }
+
+  const teacherParasha = Array.isArray(activeAssignment.teacher_parashot)
+    ? activeAssignment.teacher_parashot[0]
+    : activeAssignment.teacher_parashot
+
+  const teacherAdminId = teacherParasha?.owner_admin_id ?? student.admin_id ?? null
+
+  const { data: groups, error: groupsError } = await supabaseAdmin
+    .from('lesson_groups')
+    .select('id, section_id, sections(name, order_index)')
+    .eq('teacher_parasha_id', activeAssignment.teacher_parasha_id)
+
+  if (groupsError) {
+    throw new Error(groupsError.message)
+  }
+
+  const lessonGroups = (groups ?? []) as Array<{
+    id: number
+    sections:
+      | { name: string; order_index: number }
+      | Array<{ name: string; order_index: number }>
+      | null
+  }>
+
+  if (lessonGroups.length === 0) {
+    return {
+      student,
+      teacherAdminId,
+      parts: [],
+    }
+  }
+
+  const groupIds = lessonGroups.map((group) => group.id)
+  const { data: parts, error: partsError } = await supabaseAdmin
+    .from('lesson_parts')
+    .select(
+      'id, lesson_group_id, name, part_order, is_visible_to_student, completion_target, audio_url, video_url, media_kind'
+    )
+    .in('lesson_group_id', groupIds)
+
+  if (partsError) {
+    throw new Error(partsError.message)
+  }
+
+  const lessonParts = (parts ?? []) as Array<{
+    id: number
+    lesson_group_id: number
+    name: string
+    part_order: number
+    is_visible_to_student: boolean | null
+    completion_target: number | null
+    audio_url: string | null
+    video_url: string | null
+    media_kind?: string | null
+  }>
+
+  const partIds = lessonParts.map((part) => part.id)
+  if (partIds.length === 0) {
+    return {
+      student,
+      teacherAdminId,
+      parts: [],
+    }
+  }
+
+  const [
+    { data: slideRows, error: slidesError },
+    { data: settingRows, error: settingsError },
+    { data: practiceRows, error: practiceError },
+    { data: recordingRows, error: recordingError },
+  ] = await Promise.all([
+    supabaseAdmin
+      .from('lesson_slides')
+      .select('lesson_part_id')
+      .in('lesson_part_id', partIds),
+    supabaseAdmin
+      .from('student_lesson_part_settings')
+      .select('lesson_part_id, is_visible_to_student')
+      .eq('student_id', studentId)
+      .in('lesson_part_id', partIds),
+    supabaseAdmin
+      .from('practice_events')
+      .select('lesson_part_id, completed')
+      .eq('student_id', studentId)
+      .in('lesson_part_id', partIds),
+    supabaseAdmin
+      .from('student_recordings')
+      .select('lesson_part_id')
+      .eq('student_id', studentId)
+      .in('lesson_part_id', partIds),
+  ])
+
+  if (slidesError || settingsError || practiceError || recordingError) {
+    throw new Error(
+      slidesError?.message ??
+        settingsError?.message ??
+        practiceError?.message ??
+        recordingError?.message ??
+        'שגיאה בטעינת סטטיסטיקת WhatsApp.'
+    )
+  }
+
+  const slideCountByPartId = new Map<number, number>()
+  for (const row of (slideRows ?? []) as Array<{ lesson_part_id: number }>) {
+    slideCountByPartId.set(
+      row.lesson_part_id,
+      (slideCountByPartId.get(row.lesson_part_id) ?? 0) + 1
+    )
+  }
+
+  const visibilityByPartId = new Map<number, boolean>(
+    ((settingRows ?? []) as Array<{
+      lesson_part_id: number
+      is_visible_to_student: boolean
+    }>).map((row) => [row.lesson_part_id, row.is_visible_to_student])
+  )
+
+  const practiceCountByPartId = new Map<number, number>()
+  const completedCountByPartId = new Map<number, number>()
+  for (const row of (practiceRows ?? []) as Array<{ lesson_part_id: number; completed: boolean }>) {
+    practiceCountByPartId.set(
+      row.lesson_part_id,
+      (practiceCountByPartId.get(row.lesson_part_id) ?? 0) + 1
+    )
+    if (row.completed) {
+      completedCountByPartId.set(
+        row.lesson_part_id,
+        (completedCountByPartId.get(row.lesson_part_id) ?? 0) + 1
+      )
+    }
+  }
+
+  const recordingsSet = new Set(
+    ((recordingRows ?? []) as Array<{ lesson_part_id: number }>).map((row) => row.lesson_part_id)
+  )
+
+  const groupMetaById = new Map(
+    lessonGroups.map((group) => {
+      const section = Array.isArray(group.sections) ? group.sections[0] : group.sections
+      return [
+        group.id,
+        {
+          sectionName: section?.name ?? 'ללא חלק',
+          orderIndex: section?.order_index ?? 0,
+        },
+      ]
+    })
+  )
+
+  const summaryParts = lessonParts
+    .map((part) => {
+      const visible =
+        (part.is_visible_to_student ?? true) &&
+        (visibilityByPartId.get(part.id) ?? true)
+      const mediaKind = getLessonMediaKind(part)
+      const isReady = isReadyForWhatsApp({
+        mediaKind,
+        audioUrl: part.audio_url,
+        videoUrl: part.video_url,
+        slideCount: slideCountByPartId.get(part.id) ?? 0,
+      })
+      const meta = groupMetaById.get(part.lesson_group_id)
+
+      return {
+        lessonPartId: part.id,
+        sectionName: meta?.sectionName ?? 'ללא חלק',
+        sectionOrderIndex: meta?.orderIndex ?? 0,
+        partName: part.name,
+        partOrder: part.part_order,
+        practiceCount: practiceCountByPartId.get(part.id) ?? 0,
+        completedCount: completedCountByPartId.get(part.id) ?? 0,
+        completionTarget: Math.max(part.completion_target ?? 3, 1),
+        hasRecording: recordingsSet.has(part.id),
+        isOpenForPractice: visible && isReady,
+      }
+    })
+    .sort((left, right) => {
+      if (left.sectionOrderIndex !== right.sectionOrderIndex) {
+        return left.sectionOrderIndex - right.sectionOrderIndex
+      }
+      if (left.partOrder !== right.partOrder) {
+        return left.partOrder - right.partOrder
+      }
+      return left.lessonPartId - right.lessonPartId
+    })
+    .map((part) => ({
+      lessonPartId: part.lessonPartId,
+      sectionName: part.sectionName,
+      partName: part.partName,
+      practiceCount: part.practiceCount,
+      completedCount: part.completedCount,
+      completionTarget: part.completionTarget,
+      hasRecording: part.hasRecording,
+      isOpenForPractice: part.isOpenForPractice,
+    }))
+
+  return {
+    student,
+    teacherAdminId,
+    parts: summaryParts,
+  }
 }

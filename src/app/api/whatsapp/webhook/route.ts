@@ -3,8 +3,7 @@ import {
   buildWhatsAppBotInvalidSelectionText,
   buildWhatsAppBotMenuText,
   buildWhatsAppBotSelectionText,
-  findStudentByWhatsAppPhoneWithSource,
-  getStudentWhatsAppCatalogWithSource,
+  getStudentWhatsAppCatalogByPhoneWithSource,
   parseWhatsAppBotSelection,
 } from '@/lib/whatsapp-bot'
 import { createStudentDirectAccessLink } from '@/lib/student-direct-links'
@@ -97,15 +96,17 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
     bodyText,
   })
 
-  const findStudentStartedAt = Date.now()
-  const studentLookup = await findStudentByWhatsAppPhoneWithSource(rawPhone)
-  const student = studentLookup.student
-  checkpoints.findStudentMs = Date.now() - findStudentStartedAt
+  const lookupStartedAt = Date.now()
+  const phoneCatalog = await getStudentWhatsAppCatalogByPhoneWithSource(rawPhone)
+  const student = phoneCatalog.student
+  const lookupElapsedMs = Date.now() - lookupStartedAt
+  checkpoints.findStudentMs = lookupElapsedMs
+  checkpoints.getCatalogMs = phoneCatalog.catalog ? 0 : lookupElapsedMs
 
   if (!student) {
     console.log('whatsapp webhook student not found', {
       rawPhone,
-      studentLookupSource: studentLookup.source,
+      studentLookupSource: phoneCatalog.studentSource,
       timings: checkpoints,
       totalMs: Date.now() - startedAt,
     })
@@ -115,13 +116,21 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
   console.log('whatsapp webhook matched student', {
     studentId: student.id,
     studentName: student.name,
-    studentLookupSource: studentLookup.source,
+    studentLookupSource: phoneCatalog.studentSource,
   })
 
-  const catalogStartedAt = Date.now()
-  const catalogResult = await getStudentWhatsAppCatalogWithSource(student.id)
-  const catalog = catalogResult.catalog
-  checkpoints.getCatalogMs = Date.now() - catalogStartedAt
+  const catalog = phoneCatalog.catalog
+
+  if (!catalog) {
+    console.log('whatsapp webhook catalog missing after lookup', {
+      studentId: student.id,
+      studentLookupSource: phoneCatalog.studentSource,
+      catalogSource: phoneCatalog.catalogSource,
+      timings: checkpoints,
+      totalMs: Date.now() - startedAt,
+    })
+    return
+  }
 
   if (catalog.parts.length === 0) {
     console.log('whatsapp webhook empty catalog', {
@@ -134,7 +143,7 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
       to: rawPhone,
       body: buildWhatsAppBotEmptyCatalogText(catalog.student.name),
     })
-    checkpoints.sendMessageMs = Date.now() - catalogStartedAt - checkpoints.getCatalogMs
+    checkpoints.sendMessageMs = Date.now() - lookupStartedAt - checkpoints.findStudentMs
     console.log('whatsapp webhook sent empty catalog response', {
       to: rawPhone,
       timings: checkpoints,
@@ -147,7 +156,7 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
 
   console.log('whatsapp webhook parsed selection', {
     studentId: catalog.student.id,
-    catalogSource: catalogResult.source,
+    catalogSource: phoneCatalog.catalogSource,
     selection,
     availableParts: catalog.parts.map((part, index) => ({
       index: index + 1,
@@ -284,8 +293,8 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
   console.log('whatsapp webhook handled student message', {
     studentId: catalog.student.id,
     lessonPartId: selectedPart.lessonPartId,
-    studentLookupSource: studentLookup.source,
-    catalogSource: catalogResult.source,
+    studentLookupSource: phoneCatalog.studentSource,
+    catalogSource: phoneCatalog.catalogSource,
     timings: checkpoints,
     totalMs: Date.now() - startedAt,
   })

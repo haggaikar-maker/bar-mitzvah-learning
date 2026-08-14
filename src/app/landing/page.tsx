@@ -1,3 +1,4 @@
+import Image from 'next/image'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { landingPageContent } from '../../marketing-content/landing-page-content'
@@ -10,6 +11,49 @@ export const metadata: Metadata = {
 
 const sectionCardClasses =
   'rounded-[2rem] border border-white/60 bg-white/80 p-6 shadow-[0_20px_60px_rgba(36,63,88,0.08)] backdrop-blur'
+
+type ScreenshotFrameProps = {
+  src: string
+  alt: string
+  label: string
+  caption: string
+  viewportClassName: string
+}
+
+function ScreenshotFrame({
+  src,
+  alt,
+  label,
+  caption,
+  viewportClassName,
+}: ScreenshotFrameProps) {
+  return (
+    <div className="rounded-[2.4rem] border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8fbfd_100%)] p-3 shadow-[0_22px_64px_rgba(36,63,88,0.12)]">
+      <div className="flex items-center justify-between rounded-[1.4rem] bg-slate-900 px-4 py-3 text-white">
+        <span className="text-sm font-black tracking-[0.14em] text-amber-300">
+          {label}
+        </span>
+        <span className="text-xs font-bold text-white/70">צילום מסך אמיתי</span>
+      </div>
+
+      <div className="mt-3 rounded-[2rem] bg-[radial-gradient(circle_at_top_right,rgba(255,211,92,0.16),transparent_28%),linear-gradient(180deg,#fdfdfd_0%,#eef5fa_100%)] p-3">
+        <div
+          className={`relative overflow-hidden rounded-[1.7rem] border border-slate-200 bg-white ${viewportClassName}`}
+        >
+          <Image
+            src={src}
+            alt={alt}
+            fill
+            sizes="(max-width: 1024px) 100vw, 50vw"
+            className="object-contain object-center"
+          />
+        </div>
+      </div>
+
+      <p className="px-2 pt-4 text-sm leading-7 text-slate-600">{caption}</p>
+    </div>
+  )
+}
 
 export default function LandingPage() {
   const {
@@ -29,7 +73,7 @@ export default function LandingPage() {
     <main className="min-h-screen bg-[linear-gradient(180deg,#fff9ef_0%,#fffdf8_45%,#eef5fa_100%)] px-4 py-5 text-slate-900 sm:px-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
         <section className="relative overflow-hidden rounded-[2.75rem] border border-amber-100 bg-white shadow-[0_32px_90px_rgba(36,63,88,0.12)]">
-          <div className="grid gap-0 lg:grid-cols-[1.08fr_0.92fr]">
+          <div className="grid gap-6 p-4 lg:grid-cols-[1.02fr_0.98fr] lg:p-5">
             <div className="relative px-6 py-8 sm:px-10 sm:py-12">
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,211,92,0.18),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(111,153,187,0.18),transparent_28%)]" />
               <div className="relative z-10 max-w-2xl">
@@ -59,30 +103,18 @@ export default function LandingPage() {
               </div>
             </div>
 
-            <div className="relative min-h-[320px] overflow-hidden lg:min-h-full">
-              <div
-                className="absolute inset-0"
-                style={{
-                  background: `linear-gradient(140deg, rgba(242,161,74,0.74), rgba(255,211,92,0.42), rgba(111,153,187,0.46)), url('${hero.heroImageUrl}') center/cover`,
-                }}
-              />
-              <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(36,63,88,0.1),rgba(36,63,88,0.3))]" />
-              <div className="relative z-10 flex h-full min-h-[320px] items-end p-6 sm:p-8">
-                <div className="max-w-sm rounded-[2rem] bg-white/84 p-5 shadow-[0_20px_50px_rgba(36,63,88,0.18)] backdrop-blur">
-                  <p className="text-sm font-black text-slate-900">
-                    תלמיד, מלמד, משפחה ו־WhatsApp באותה שפה.
-                  </p>
-                  <p className="mt-2 text-sm leading-7 text-slate-700">
-                    בונים ספריית לימוד מסודרת, פותחים קטעים בהדרגה, שומרים הקלטות ומלווים את הדרך עד העלייה לתורה.
-                  </p>
-                </div>
-              </div>
-            </div>
+            <ScreenshotFrame
+              src={hero.heroImageUrl}
+              alt="משפחה לומדת יחד לבר מצווה"
+              label="אווירה משפחתית"
+              caption="כאן אפשר לשים תמונת אווירה ראשית שמספרת מיד את הסיפור: תלמיד, משפחה, מסורת וליווי אישי."
+              viewportClassName="h-[300px] sm:h-[360px] lg:h-[520px]"
+            />
           </div>
         </section>
 
         <section className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
-          <div className={`${sectionCardClasses}`}>
+          <div className={sectionCardClasses}>
             <p className="text-sm font-black tracking-[0.16em] text-amber-600">
               תמונת מצב
             </p>
@@ -144,44 +176,26 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <div
-            className="relative min-h-[340px] overflow-hidden rounded-[2.5rem] border border-amber-100 shadow-[0_22px_64px_rgba(36,63,88,0.12)]"
-            style={{
-              background: `linear-gradient(145deg, rgba(255,211,92,0.18), rgba(36,63,88,0.08)), url('${imageSlots.teacherShowcaseImageUrl}') center/cover`,
-            }}
-          >
-            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(36,63,88,0.26))]" />
-            <div className="relative z-10 flex h-full items-end justify-start p-6">
-              <div className="max-w-sm rounded-[1.9rem] bg-white/90 p-5 backdrop-blur">
-                <p className="text-sm font-black text-slate-900">דשבורד מלמד</p>
-                <p className="mt-2 text-sm leading-7 text-slate-700">
-                  שליטה בתוכן, בתלמידים, במדיה ובתזכורות בלי לעבור בין כמה מערכות.
-                </p>
-              </div>
-            </div>
-          </div>
+          <ScreenshotFrame
+            src={imageSlots.teacherShowcaseImageUrl}
+            alt="מסך ניהול של המלמד"
+            label="דשבורד מלמד"
+            caption="תמונה רחבה שמתאימה במיוחד למסך הניהול, עם מקום ברור לראות תלמידים, פרשות, תוכן וסטטיסטיקות."
+            viewportClassName="h-[260px] sm:h-[320px] lg:h-[360px]"
+          />
         </section>
 
         <section
           id={studentSection.id}
           className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]"
         >
-          <div
-            className="relative min-h-[320px] overflow-hidden rounded-[2.5rem] border border-sky-100 shadow-[0_22px_64px_rgba(36,63,88,0.12)]"
-            style={{
-              background: `linear-gradient(145deg, rgba(111,153,187,0.22), rgba(255,255,255,0.18)), url('${imageSlots.studentShowcaseImageUrl}') center/cover`,
-            }}
-          >
-            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(36,63,88,0.22))]" />
-            <div className="relative z-10 flex h-full items-end p-6">
-              <div className="max-w-sm rounded-[1.8rem] bg-white/88 p-5 backdrop-blur">
-                <p className="text-sm font-black text-slate-900">חוויית תלמיד</p>
-                <p className="mt-2 text-sm leading-7 text-slate-700">
-                  מסך ממוקד לפלאפון, עם קטע ברור, מדיה מתאימה, הקלטה עצמית ותזכורת למה ללמוד עכשיו.
-                </p>
-              </div>
-            </div>
-          </div>
+          <ScreenshotFrame
+            src={imageSlots.studentShowcaseImageUrl}
+            alt="מסך תלמיד בפלאפון"
+            label="מסך תלמיד"
+            caption="התצוגה כאן שומרת על כל המסך הארוך של התלמיד בצורה קריאה, בלי לחתוך את הכפתורים או את אזור התרגול."
+            viewportClassName="h-[440px] sm:h-[560px] lg:h-[720px]"
+          />
 
           <div className={`${sectionCardClasses} flex flex-col justify-center`}>
             <p className="text-sm font-black tracking-[0.18em] text-amber-600">
@@ -230,27 +244,13 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <div
-            className="relative min-h-[360px] overflow-hidden rounded-[2.5rem] border border-emerald-100 shadow-[0_22px_64px_rgba(36,63,88,0.12)]"
-            style={{
-              background: `linear-gradient(145deg, rgba(255,211,92,0.2), rgba(111,153,187,0.24)), url('${imageSlots.whatsappShowcaseImageUrl}') center/cover`,
-            }}
-          >
-            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(36,63,88,0.06),rgba(36,63,88,0.28))]" />
-            <div className="relative z-10 flex h-full items-end justify-end p-6">
-              <div className="max-w-sm rounded-[1.9rem] bg-slate-900/88 p-5 text-white backdrop-blur">
-                <p className="text-sm font-black tracking-[0.12em] text-amber-300">
-                  תרחיש אמיתי
-                </p>
-                <p className="mt-3 text-lg font-black">
-                  &quot;שלום, היום כדאי לתרגל את חלק שלישי&quot;
-                </p>
-                <p className="mt-2 text-sm leading-7 text-white/90">
-                  התלמיד מקבל קישור מדויק, תפריט, סטטיסטיקות וקשר ישיר עם המלמד בלי לחפש חומרים.
-                </p>
-              </div>
-            </div>
-          </div>
+          <ScreenshotFrame
+            src={imageSlots.whatsappShowcaseImageUrl}
+            alt="התכתבות WhatsApp עם התלמיד"
+            label="WhatsApp בפועל"
+            caption="כאן רואים ממש את חוויית הוואטסאפ: תזכורת, בוט, תפריט וקישור ישיר, בלי שהמסך ייחתך בדרך."
+            viewportClassName="h-[440px] sm:h-[560px] lg:h-[720px]"
+          />
         </section>
 
         <section className="rounded-[2.5rem] border border-amber-100 bg-[linear-gradient(180deg,rgba(255,255,255,0.95),rgba(248,244,216,0.94))] p-6 shadow-[0_22px_64px_rgba(36,63,88,0.09)] sm:p-8">
@@ -281,22 +281,13 @@ export default function LandingPage() {
         </section>
 
         <section className="grid gap-5 lg:grid-cols-[1fr_1fr]">
-          <div
-            className="relative min-h-[340px] overflow-hidden rounded-[2.5rem] border border-slate-200 shadow-[0_22px_64px_rgba(36,63,88,0.12)]"
-            style={{
-              background: `linear-gradient(145deg, rgba(242,161,74,0.24), rgba(36,63,88,0.1)), url('${imageSlots.legacyShowcaseImageUrl}') center/cover`,
-            }}
-          >
-            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(36,63,88,0.12),rgba(36,63,88,0.36))]" />
-            <div className="relative z-10 flex h-full items-end p-6">
-              <div className="max-w-md rounded-[1.9rem] bg-white/88 p-5 backdrop-blur">
-                <p className="text-sm font-black text-slate-900">זיכרון שנשאר</p>
-                <p className="mt-2 text-sm leading-7 text-slate-700">
-                  הקלטה של אבא, סבא או מלמד אהוב יכולה להפוך לנכס משפחתי שחוזר שוב בכל דור.
-                </p>
-              </div>
-            </div>
-          </div>
+          <ScreenshotFrame
+            src={imageSlots.legacyShowcaseImageUrl}
+            alt="משפחה לומדת מתוך מסורת"
+            label="המשכיות משפחתית"
+            caption="תמונה רחבה יותר שמתאימה למסרים הרגשיים של המשפחה, הזיכרון והשימור לדורות."
+            viewportClassName="h-[280px] sm:h-[340px] lg:h-[420px]"
+          />
 
           <div className={`${sectionCardClasses} flex flex-col justify-center`}>
             <p className="text-sm font-black tracking-[0.18em] text-sky-700">

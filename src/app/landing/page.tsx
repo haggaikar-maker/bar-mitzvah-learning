@@ -1,6 +1,6 @@
-import Image from 'next/image'
 import Link from 'next/link'
 import type { Metadata } from 'next'
+import { MarketingScreenshotFrame } from '@/src/components/marketing-screenshot-frame'
 import { landingPageContent } from '../../marketing-content/landing-page-content'
 
 export const metadata: Metadata = {
@@ -11,49 +11,6 @@ export const metadata: Metadata = {
 
 const sectionCardClasses =
   'rounded-[2rem] border border-white/60 bg-white/80 p-6 shadow-[0_20px_60px_rgba(36,63,88,0.08)] backdrop-blur'
-
-type ScreenshotFrameProps = {
-  src: string
-  alt: string
-  label: string
-  caption: string
-  viewportClassName: string
-}
-
-function ScreenshotFrame({
-  src,
-  alt,
-  label,
-  caption,
-  viewportClassName,
-}: ScreenshotFrameProps) {
-  return (
-    <div className="rounded-[2.4rem] border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8fbfd_100%)] p-3 shadow-[0_22px_64px_rgba(36,63,88,0.12)]">
-      <div className="flex items-center justify-between rounded-[1.4rem] bg-slate-900 px-4 py-3 text-white">
-        <span className="text-sm font-black tracking-[0.14em] text-amber-300">
-          {label}
-        </span>
-        <span className="text-xs font-bold text-white/70">צילום מסך אמיתי</span>
-      </div>
-
-      <div className="mt-3 rounded-[2rem] bg-[radial-gradient(circle_at_top_right,rgba(255,211,92,0.16),transparent_28%),linear-gradient(180deg,#fdfdfd_0%,#eef5fa_100%)] p-3">
-        <div
-          className={`relative overflow-hidden rounded-[1.7rem] border border-slate-200 bg-white ${viewportClassName}`}
-        >
-          <Image
-            src={src}
-            alt={alt}
-            fill
-            sizes="(max-width: 1024px) 100vw, 50vw"
-            className="object-contain object-center"
-          />
-        </div>
-      </div>
-
-      <p className="px-2 pt-4 text-sm leading-7 text-slate-600">{caption}</p>
-    </div>
-  )
-}
 
 export default function LandingPage() {
   const {
@@ -103,7 +60,7 @@ export default function LandingPage() {
               </div>
             </div>
 
-            <ScreenshotFrame
+            <MarketingScreenshotFrame
               src={hero.heroImageUrl}
               alt="משפחה לומדת יחד לבר מצווה"
               label="אווירה משפחתית"
@@ -176,7 +133,7 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <ScreenshotFrame
+          <MarketingScreenshotFrame
             src={imageSlots.teacherShowcaseImageUrl}
             alt="מסך ניהול של המלמד"
             label="דשבורד מלמד"
@@ -189,7 +146,7 @@ export default function LandingPage() {
           id={studentSection.id}
           className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]"
         >
-          <ScreenshotFrame
+          <MarketingScreenshotFrame
             src={imageSlots.studentShowcaseImageUrl}
             alt="מסך תלמיד בפלאפון"
             label="מסך תלמיד"
@@ -244,7 +201,7 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <ScreenshotFrame
+          <MarketingScreenshotFrame
             src={imageSlots.whatsappShowcaseImageUrl}
             alt="התכתבות WhatsApp עם התלמיד"
             label="WhatsApp בפועל"
@@ -281,7 +238,7 @@ export default function LandingPage() {
         </section>
 
         <section className="grid gap-5 lg:grid-cols-[1fr_1fr]">
-          <ScreenshotFrame
+          <MarketingScreenshotFrame
             src={imageSlots.legacyShowcaseImageUrl}
             alt="משפחה לומדת מתוך מסורת"
             label="המשכיות משפחתית"

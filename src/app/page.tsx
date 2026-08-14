@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getAdminSession } from '@/lib/admin-auth'
 import { getStudentSession } from '@/lib/student-auth'
@@ -59,6 +60,14 @@ export default async function HomePage({ searchParams }: HomePageProps) {
           <h1 className="text-3xl font-black tracking-tight text-white sm:text-5xl">
             מערכת תרגול לבר מצווה
           </h1>
+          <div className="mt-5">
+            <Link
+              href="/landing"
+              className="inline-flex rounded-full bg-white/92 px-5 py-2 text-sm font-black text-slate-900 transition hover:bg-white"
+            >
+              לדף המידע והשיווק
+            </Link>
+          </div>
         </section>
 
         <div className="mx-auto w-full max-w-md rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">

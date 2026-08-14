@@ -91,10 +91,11 @@ export const landingPageContent = {
     },
   ] satisfies LandingStep[],
   imageSlots: {
-    heroImageUrl: '/login-ui/top-banner.jpg',
-    studentShowcaseImageUrl: '/student-ui/parasha-background.jpg',
-    whatsappShowcaseImageUrl: '/student-ui/section-background.jpg',
-    legacyShowcaseImageUrl: '/student-ui/footer-banner.jpg',
+    heroImageUrl: '/marketing-ui/hero-main.jpg',
+    studentShowcaseImageUrl: '/marketing-ui/student-screen.jpg',
+    teacherShowcaseImageUrl: '/marketing-ui/teacher-dashboard.jpg',
+    whatsappShowcaseImageUrl: '/marketing-ui/whatsapp-screen.jpg',
+    legacyShowcaseImageUrl: '/marketing-ui/family-legacy.jpg',
   },
   studentSection: {
     id: 'student-experience',

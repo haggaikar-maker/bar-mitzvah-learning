@@ -123,6 +123,45 @@ export default function LandingPage() {
           ))}
         </section>
 
+        <section className="grid gap-5 lg:grid-cols-[1.02fr_0.98fr]">
+          <div className={`${sectionCardClasses} flex flex-col justify-center`}>
+            <p className="text-sm font-black tracking-[0.18em] text-amber-600">
+              שליטת מלמד
+            </p>
+            <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950">
+              המלמד רואה תמונה מלאה ופותח בדיוק את מה שצריך
+            </h2>
+            <p className="mt-4 text-base leading-8 text-slate-700">
+              מסך הניהול מאפשר להגדיר נוסח, לבנות חלוקה אישית, להעלות אודיו או וידאו, לשלוט במה גלוי לתלמיד ולעקוב אחרי כל תרגול והשלמה במקום אחד.
+            </p>
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-[1.6rem] bg-white px-5 py-4 text-sm font-bold text-slate-700 ring-1 ring-slate-200">
+                ספריות פרשה, חלקים ותתי־חלקים לפי שיטת העבודה של המלמד
+              </div>
+              <div className="rounded-[1.6rem] bg-slate-900 px-5 py-4 text-sm font-bold text-white">
+                מעקב תרגולים, פתיחה והסתרה של קטעים, ושליחה ישירה ל־WhatsApp
+              </div>
+            </div>
+          </div>
+
+          <div
+            className="relative min-h-[340px] overflow-hidden rounded-[2.5rem] border border-amber-100 shadow-[0_22px_64px_rgba(36,63,88,0.12)]"
+            style={{
+              background: `linear-gradient(145deg, rgba(255,211,92,0.18), rgba(36,63,88,0.08)), url('${imageSlots.teacherShowcaseImageUrl}') center/cover`,
+            }}
+          >
+            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(36,63,88,0.26))]" />
+            <div className="relative z-10 flex h-full items-end justify-start p-6">
+              <div className="max-w-sm rounded-[1.9rem] bg-white/90 p-5 backdrop-blur">
+                <p className="text-sm font-black text-slate-900">דשבורד מלמד</p>
+                <p className="mt-2 text-sm leading-7 text-slate-700">
+                  שליטה בתוכן, בתלמידים, במדיה ובתזכורות בלי לעבור בין כמה מערכות.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section
           id={studentSection.id}
           className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]"

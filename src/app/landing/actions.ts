@@ -1,6 +1,7 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { isRedirectError } from 'next/dist/client/components/redirect-error'
 import {
   buildMarketingLeadNotificationText,
   insertMarketingLead,
@@ -74,6 +75,10 @@ export async function sendMarketingWhatsAppDemo(formData: FormData) {
       })
     )
   } catch (error) {
+    if (isRedirectError(error)) {
+      throw error
+    }
+
     let message = error instanceof Error ? error.message : 'שליחת הדמו נכשלה.'
 
     if (message.includes('(#132000)')) {
@@ -148,6 +153,10 @@ export async function submitMarketingLead(formData: FormData) {
       })
     )
   } catch (error) {
+    if (isRedirectError(error)) {
+      throw error
+    }
+
     const message = error instanceof Error ? error.message : 'שליחת הפרטים נכשלה.'
     redirect(
       buildRedirectUrl({

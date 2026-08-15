@@ -37,6 +37,41 @@ export function sanitizePhoneNumber(phone: string) {
   return phone.replace(/[^\d]/g, '')
 }
 
+export function normalizePhoneWithDefaultCountryCode(input: {
+  phone: string
+  defaultCountryCode?: string | null
+}) {
+  const digits = sanitizePhoneNumber(input.phone)
+
+  if (!digits) {
+    return ''
+  }
+
+  const countryCode = sanitizePhoneNumber(input.defaultCountryCode ?? '')
+
+  if (!countryCode) {
+    return digits
+  }
+
+  if (digits.startsWith(`00${countryCode}`)) {
+    return digits.slice(2)
+  }
+
+  if (digits.startsWith(countryCode)) {
+    return digits
+  }
+
+  if (digits.startsWith('0')) {
+    return `${countryCode}${digits.slice(1)}`
+  }
+
+  if (digits.length <= 10) {
+    return `${countryCode}${digits}`
+  }
+
+  return digits
+}
+
 export function sanitizeInternalRedirectPath(path: string | null | undefined) {
   if (!path) {
     return null

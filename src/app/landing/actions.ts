@@ -6,7 +6,11 @@ import {
   insertMarketingLead,
   upsertMarketingDemoSession,
 } from '@/lib/marketing-landing'
-import { sendWhatsAppTemplateMessage, sendWhatsAppTextMessage } from '@/lib/whatsapp'
+import {
+  normalizePhoneWithDefaultCountryCode,
+  sendWhatsAppTemplateMessage,
+  sendWhatsAppTextMessage,
+} from '@/lib/whatsapp'
 import { landingPageContent } from '@/src/marketing-content/landing-page-content'
 
 function readString(formData: FormData, key: string) {
@@ -29,9 +33,13 @@ function buildRedirectUrl(input: {
 export async function sendMarketingWhatsAppDemo(formData: FormData) {
   const phone = readString(formData, 'phone')
   const whatsappConfig = landingPageContent.whatsapp
+  const normalizedPhone = normalizePhoneWithDefaultCountryCode({
+    phone,
+    defaultCountryCode: whatsappConfig.defaultCountryCode,
+  })
 
   try {
-    if (!phone) {
+    if (!normalizedPhone) {
       redirect(
         buildRedirectUrl({
           sectionId: whatsappConfig.id,
@@ -43,14 +51,14 @@ export async function sendMarketingWhatsAppDemo(formData: FormData) {
     }
 
     await upsertMarketingDemoSession({
-      phone,
+      phone: normalizedPhone,
       demoStudentId: whatsappConfig.demoStudentId,
       templateName: whatsappConfig.metaTemplateName || null,
       sessionHours: whatsappConfig.demoSessionHours,
     })
 
     await sendWhatsAppTemplateMessage({
-      to: phone,
+      to: normalizedPhone,
       templateName: whatsappConfig.metaTemplateName,
       languageCode: whatsappConfig.metaTemplateLanguageCode,
       bodyParameters: whatsappConfig.metaTemplateBodyParameters,
@@ -65,7 +73,13 @@ export async function sendMarketingWhatsAppDemo(formData: FormData) {
       })
     )
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'שליחת הדמו נכשלה.'
+    let message = error instanceof Error ? error.message : 'שליחת הדמו נכשלה.'
+
+    if (message.includes('(#132000)')) {
+      message =
+        'תבנית ה-WhatsApp שנבחרה דורשת כמות פרמטרים שונה מזו שהוגדרה באתר. צריך לעדכן ב-Meta או בקובץ התוכן את metaTemplateBodyParameters כך שיתאימו בדיוק לתבנית.'
+    }
+
     redirect(
       buildRedirectUrl({
         sectionId: whatsappConfig.id,

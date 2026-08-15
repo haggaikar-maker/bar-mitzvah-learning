@@ -66,7 +66,7 @@ export const landingPageContent = {
     submitLabel: 'שליחת הודעת דמו',
     helperText:
       'אחרי קבלת ההודעה אפשר להשיב לבוט ולקבל גישה זמנית לתלמיד לדוגמה. אפשר גם לשלוח 100 להשארת פרטים דרך ה־WhatsApp.',
-    metaTemplateName: 'bar_mitzvah_demo_entry',
+    metaTemplateName: 'reminder',
     metaTemplateLanguageCode: 'he',
     metaTemplateBodyParameters: [] as string[],
     demoStudentId: 11,

@@ -188,7 +188,7 @@ type LessonPartTeacherParashaLookupClient = {
 }
 
 function getBotPromptLine() {
-  return 'השב עם מספר הקטע שתרצה לפתוח. 0 או "תפריט" לרשימה הראשית, # לסטטיסטיקה, 99 להודעה למלמד.'
+  return 'השב עם מספר הקטע שתרצה לפתוח. 0 או "תפריט" לרשימה הראשית, # לסטטיסטיקה, 99 להודעה למלמד, 100 להשארת פרטים.'
 }
 
 function isReadyForWhatsApp(input: {
@@ -1074,6 +1074,10 @@ export function parseWhatsAppBotSelection(text: string) {
     return 'contact_teacher'
   }
 
+  if (normalized === '100') {
+    return 'leave_details'
+  }
+
   if (!/^\d+$/.test(normalized)) {
     return null
   }
@@ -1139,6 +1143,25 @@ export function buildWhatsAppBotTeacherMessageSentText(input: {
     `שלום ${input.studentName}`,
     `ההודעה נשלחה למלמד ${input.teacherName}.`,
     'אפשר להמשיך עם 0 לתפריט הראשי.',
+  ].join('\n')
+}
+
+export function buildWhatsAppBotLeadDetailsPromptText(studentName: string) {
+  return [
+    `שלום ${studentName}`,
+    'כדי להשאיר פרטים, שלח הודעה בפורמט הבא:',
+    'שם: ',
+    'ליווי: הורה / מלמד',
+    'אימייל: ',
+    'הערות: ',
+  ].join('\n')
+}
+
+export function buildWhatsAppBotLeadDetailsSavedText(studentName: string) {
+  return [
+    `שלום ${studentName}`,
+    'הפרטים נשמרו בהצלחה.',
+    'נחזור אליך בהקדם. אפשר להמשיך גם עם 0 לתפריט הראשי.',
   ].join('\n')
 }
 

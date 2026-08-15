@@ -5,6 +5,13 @@ type WhatsAppTextSendInput = {
   body: string
 }
 
+type WhatsAppTemplateSendInput = {
+  to: string
+  templateName: string
+  languageCode?: string | null
+  bodyParameters?: string[]
+}
+
 export const DEFAULT_WHATSAPP_TEMPLATE = [
   'שלום %STUDENT%',
   'היום כדאי לתרגל את %SECTION% חלק %PART%.',
@@ -150,6 +157,99 @@ export async function sendWhatsAppTextMessage(input: WhatsAppTextSendInput) {
 
   console.log('whatsapp send success', {
     to: sanitizePhoneNumber(input.to),
+    status: response.status,
+    responseMs,
+    messageId: responseBody?.messages?.[0]?.id ?? null,
+  })
+
+  return {
+    messageId: responseBody?.messages?.[0]?.id ?? null,
+    responseBody,
+  } satisfies WhatsAppSendResult
+}
+
+export async function sendWhatsAppTemplateMessage(
+  input: WhatsAppTemplateSendInput
+) {
+  const accessToken = getRequiredEnv('WHATSAPP_ACCESS_TOKEN')
+  const phoneNumberId = getRequiredEnv('WHATSAPP_PHONE_NUMBER_ID')
+  const version = process.env.WHATSAPP_API_VERSION ?? 'v23.0'
+  const endpoint = `https://graph.facebook.com/${version}/${phoneNumberId}/messages`
+  const startedAt = Date.now()
+
+  const bodyParameters = (input.bodyParameters ?? [])
+    .map((value) => value.trim())
+    .filter(Boolean)
+
+  console.log('whatsapp template send start', {
+    to: sanitizePhoneNumber(input.to),
+    templateName: input.templateName,
+    bodyParameterCount: bodyParameters.length,
+    endpoint,
+  })
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: sanitizePhoneNumber(input.to),
+      type: 'template',
+      template: {
+        name: input.templateName,
+        language: {
+          code: input.languageCode?.trim() || 'he',
+        },
+        ...(bodyParameters.length > 0
+          ? {
+              components: [
+                {
+                  type: 'body',
+                  parameters: bodyParameters.map((value) => ({
+                    type: 'text',
+                    text: value,
+                  })),
+                },
+              ],
+            }
+          : {}),
+      },
+    }),
+    cache: 'no-store',
+  })
+
+  const responseMs = Date.now() - startedAt
+
+  const responseBody = (await response.json().catch(() => null)) as
+    | {
+        error?: {
+          message?: string
+        }
+        messages?: Array<{ id?: string }>
+      }
+    | null
+
+  if (!response.ok) {
+    console.error('whatsapp template send failed', {
+      to: sanitizePhoneNumber(input.to),
+      templateName: input.templateName,
+      status: response.status,
+      responseMs,
+      errorMessage: responseBody?.error?.message ?? null,
+    })
+    throw new Error(
+      responseBody?.error?.message ??
+        `שליחת תבנית ה-WhatsApp נכשלה עם קוד ${response.status}.`
+    )
+  }
+
+  console.log('whatsapp template send success', {
+    to: sanitizePhoneNumber(input.to),
+    templateName: input.templateName,
     status: response.status,
     responseMs,
     messageId: responseBody?.messages?.[0]?.id ?? null,

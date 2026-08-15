@@ -39,7 +39,7 @@ export const landingPageContent = {
     imageCaption: 'לחיצה על התמונה פותחת אותה בגודל מלא.',
     demoLink: {
       label: 'לקטע וידאו לדוגמה באתר',
-      href: '/student/lesson/1',
+      href: 'https://bar-mitzvah-learning.vercel.app/student/direct/62d897d5d8f4d6e19a743e08e8c961a2f7736248d45b1b1075e9e0ca140a3a5b',
     } satisfies MarketingDemoLink,
   },
   guide: {
@@ -61,12 +61,14 @@ export const landingPageContent = {
     imageAlt: 'דוגמת WhatsApp',
     imageLabel: 'WhatsApp',
     imageCaption: 'תצוגת הדמו מראה איך התלמיד מקבל קטעים, סטטיסטיקות וקישורים ישירים.',
+    countryCodeFieldLabel: 'קידומת',
+    countryCodeFieldPlaceholder: '972',
     phoneFieldLabel: 'מספר טלפון לקבלת דמו',
-    phoneFieldPlaceholder: 'למשל 054-1234567 או +1...',
+    phoneFieldPlaceholder: '542181248 או 0542181248',
     defaultCountryCode: '972',
     submitLabel: 'שליחת הודעת דמו',
     helperText:
-      'ברירת המחדל היא ישראל 972, לכן אפשר לרשום מספר ישראלי רגיל כמו 054-1234567. אם רוצים קידומת אחרת, רושמים אותה במפורש כמו +1 או +44. אחרי קבלת ההודעה אפשר להשיב לבוט ולקבל גישה זמנית לתלמיד לדוגמה. אפשר גם לשלוח 100 להשארת פרטים דרך ה־WhatsApp.',
+      'ברירת המחדל היא ישראל 972. במספר עצמו אפשר לרשום עם 0 בהתחלה או בלי 0, אבל בלי מקפים באמצע. אם רוצים מדינה אחרת, משנים את הקידומת. אחרי קבלת ההודעה אפשר להשיב לבוט ולקבל גישה זמנית לתלמיד לדוגמה. אפשר גם לשלוח 100 להשארת פרטים דרך ה־WhatsApp.',
     metaTemplateName: 'reminder',
     metaTemplateLanguageCode: 'he',
     metaTemplateBodyParameters: [] as string[],

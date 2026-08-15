@@ -161,17 +161,36 @@ export default async function LandingPage({ searchParams }: LandingPageProps) {
             />
 
             <form action={sendMarketingWhatsAppDemo} className="rounded-[1.8rem] bg-slate-50 p-4 ring-1 ring-slate-200">
-              <label className="block">
-                <span className="mb-2 block text-sm font-bold text-slate-700">
-                  {whatsapp.phoneFieldLabel}
-                </span>
-                <input
-                  type="tel"
-                  name="phone"
-                  placeholder={whatsapp.phoneFieldPlaceholder}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
-                />
-              </label>
+              <div className="grid gap-3 sm:grid-cols-[150px_minmax(0,1fr)]">
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-700">
+                    {whatsapp.countryCodeFieldLabel}
+                  </span>
+                  <input
+                    type="tel"
+                    name="countryCode"
+                    inputMode="numeric"
+                    defaultValue={whatsapp.defaultCountryCode}
+                    placeholder={whatsapp.countryCodeFieldPlaceholder}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
+                    dir="ltr"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-700">
+                    {whatsapp.phoneFieldLabel}
+                  </span>
+                  <input
+                    type="tel"
+                    name="phone"
+                    inputMode="numeric"
+                    placeholder={whatsapp.phoneFieldPlaceholder}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
+                    dir="ltr"
+                  />
+                </label>
+              </div>
 
               <div className="mt-4">
                 <PendingSubmitButton

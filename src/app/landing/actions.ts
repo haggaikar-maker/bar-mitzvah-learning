@@ -32,10 +32,11 @@ function buildRedirectUrl(input: {
 
 export async function sendMarketingWhatsAppDemo(formData: FormData) {
   const phone = readString(formData, 'phone')
+  const countryCode = readString(formData, 'countryCode')
   const whatsappConfig = landingPageContent.whatsapp
   const normalizedPhone = normalizePhoneWithDefaultCountryCode({
     phone,
-    defaultCountryCode: whatsappConfig.defaultCountryCode,
+    defaultCountryCode: countryCode || whatsappConfig.defaultCountryCode,
   })
 
   try {

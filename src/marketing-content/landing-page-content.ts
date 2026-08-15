@@ -69,15 +69,9 @@ export const landingPageContent = {
     submitLabel: 'שליחת הודעת דמו',
     helperText:
       'ברירת המחדל היא ישראל 972. במספר עצמו אפשר לרשום עם 0 בהתחלה או בלי 0, אבל בלי מקפים באמצע. אם רוצים מדינה אחרת, משנים את הקידומת. אחרי קבלת ההודעה אפשר להשיב לבוט ולקבל גישה זמנית לתלמיד לדוגמה. אפשר גם לשלוח 100 להשארת פרטים דרך ה־WhatsApp.',
-    metaTemplateName: 'reminder',
+    metaTemplateName: 'bar_mitzvah_demo_entry',
     metaTemplateLanguageCode: 'he',
-    metaTemplateBodyParameters: [
-  'תלמיד לדוגמה',
-  'ראשון',
-  '1',
-  '100',
-  'https://bar-mitzvah-learning.vercel.app/student/lesson/1',
-] as string[],
+    metaTemplateBodyParameters: [] as string[],
     demoStudentId: 11,
     demoSessionHours: 24,
     detailsCommand: '100',

@@ -71,7 +71,7 @@ export const landingPageContent = {
       'ברירת המחדל היא ישראל 972. במספר עצמו אפשר לרשום עם 0 בהתחלה או בלי 0, אבל בלי מקפים באמצע. אם רוצים מדינה אחרת, משנים את הקידומת. אחרי קבלת ההודעה אפשר להשיב לבוט ולקבל גישה זמנית לתלמיד לדוגמה. אפשר גם לשלוח 100 להשארת פרטים דרך ה־WhatsApp.',
     metaTemplateName: 'reminder',
     metaTemplateLanguageCode: 'he',
-    metaTemplateBodyParameters: [] as string[],
+    metaTemplateBodyParameters: ['תלמיד לדוגמא' , 'ראשון' , '1', '100', 'https://bar-mitzvah-learning.vercel.app/student/direct/62d897d5d8f4d6e19a743e08e8c961a2f7736248d45b1b1075e9e0ca140a3a5b'] as string[],
     demoStudentId: 11,
     demoSessionHours: 24,
     detailsCommand: '100',

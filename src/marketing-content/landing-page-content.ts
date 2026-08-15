@@ -1,123 +1,98 @@
-export type LandingSectionCard = {
-  eyebrow: string
-  title: string
-  description: string
+export type MarketingQuickLink = {
+  label: string
+  href: string
 }
 
-export type LandingHighlight = {
-  title: string
-  description: string
+export type MarketingDemoLink = {
+  label: string
+  href: string
 }
 
-export type LandingStep = {
-  title: string
-  description: string
+export type MarketingLeadRoleOption = {
+  value: string
+  label: string
 }
 
 export const landingPageContent = {
-  hero: {
-    badge: 'מערכת דיגיטלית ללימוד בר מצווה',
-    title: 'לימוד בר מצווה שמחבר בין תלמיד, מלמד, משפחה ו־WhatsApp במקום אחד.',
+  general: {
+    id: 'marketing-general',
+    title: 'ליווי דיגיטלי מסודר ללימוד בר מצווה',
     description:
-      'מכינים קריאה מדויקת, שומרים הקלטות וסרטונים, שולחים תזכורות חכמות ומלווים את התלמיד צעד אחר צעד עד העלייה לתורה וגם אחריה.',
-    primaryCtaLabel: 'כניסה למערכת',
-    primaryCtaHref: '/',
-    secondaryCtaLabel: 'איך זה נראה לתלמיד',
-    secondaryCtaHref: '#student-experience',
-    heroImageUrl: '/login-ui/top-banner.jpg',
+      'סרטונים, מעקב תרגולים, קישורים ישירים ו־WhatsApp חכם במקום אחד. מתאים להורים, מלמדים ובני מצווה שרוצים תהליך ברור ונוח.',
+    quickLinks: [
+      { label: 'תלמיד', href: '#marketing-student' },
+      { label: 'מלווה', href: '#marketing-guide' },
+      { label: 'WhatsApp', href: '#marketing-whatsapp' },
+      { label: 'השארת פרטים', href: '#marketing-contact' },
+    ] satisfies MarketingQuickLink[],
   },
-  story: {
-    title: 'לא עוד קבצים מפוזרים וקבוצות בלי סדר',
+  student: {
+    id: 'marketing-student',
+    title: 'לתלמיד',
+    textPrimary:
+      'התלמיד מקבל אזור לימוד ברור, נקי וממוקד. כל קטע נפתח בזמן הנכון, עם וידאו, אודיו, תמונות, הקלטה עצמית ומעקב התקדמות.',
+    textSecondary:
+      'אפשר לשלוח אותו ישירות לקטע הרלוונטי בלי לבקש ממנו שם משתמש וסיסמה בכל פעם, וכך הלמידה נשארת זורמת גם מהטלפון.',
+    imageUrl: '/marketing-ui/student-screen.jpg',
+    imageAlt: 'מסך תלמיד לדוגמה',
+    imageLabel: 'אזור תלמיד',
+    imageCaption: 'לחיצה על התמונה פותחת אותה בגודל מלא.',
+    demoLink: {
+      label: 'לקטע וידאו לדוגמה באתר',
+      href: '/student/lesson/1',
+    } satisfies MarketingDemoLink,
+  },
+  guide: {
+    id: 'marketing-guide',
+    title: 'למלווה',
     description:
-      'המערכת מרכזת פרשות, תתי־חלקים, אודיו, וידאו, תמונות, הקלטות תלמיד, מעקב תרגולים ותזכורות WhatsApp. כל תלמיד רואה רק מה שפתוח לו, וכל מלמד עובד בשיטה שמתאימה בדיוק לנוסח ולחלוקה שלו.',
-    stats: [
-      { value: '1', label: 'בית אחד לניהול הלימוד' },
-      { value: 'WhatsApp', label: 'תזכורות ובוט עוזר' },
-      { value: 'משפחתי', label: 'שומר מסורת והקלטות לדורות' },
-    ],
+      'המלמד או ההורה שולט בתהליך: מגדיר קטעים, בוחר מה גלוי, מעלה מדיה, רואה סטטיסטיקות ושולח תזכורות מדויקות בקליק.',
+    imageUrl: '/marketing-ui/teacher-dashboard.jpg',
+    imageAlt: 'מסך מלווה לדוגמה',
+    imageLabel: 'אזור מלווה',
+    imageCaption: 'מסך ניהול רחב שמרכז תלמידים, תוכן, תרגולים והודעות.',
   },
-  experienceCards: [
-    {
-      eyebrow: 'לתלמיד',
-      title: 'מסלול לימוד ברור ופשוט',
-      description:
-        'רואה רק קטעים פתוחים, מתרגל אודיו או וידאו, מקליט את עצמו ושומר התקדמות בלי עומס ובלי בלבול.',
-    },
-    {
-      eyebrow: 'למלמד',
-      title: 'שליטה מלאה בחלוקה ובתוכן',
-      description:
-        'מגדיר נוסח, בונה מבנה אישי לכל פרשה, מעלה מדיה, פותח קטעים בהדרגה ושולח תזכורות ישירות ל־WhatsApp.',
-    },
-    {
-      eyebrow: 'למשפחה',
-      title: 'מעורבות בלי לרדוף אחרי החומר',
-      description:
-        'כל החומרים זמינים בצורה מסודרת, עם קישורים ישירים ויכולת לשמר קול משפחתי שילמד גם את הדור הבא.',
-    },
-  ] satisfies LandingSectionCard[],
-  highlights: [
-    {
-      title: 'בוט WhatsApp שמזכיר מה ללמוד היום',
-      description:
-        'לחיצה אחת מהמלמד או מהמנהל, והתלמיד מקבל קישור ישיר לתת־החלק הרלוונטי עם טקסט ברור והמשך עבודה מיידי.',
-    },
-    {
-      title: 'תזכורת גם אחרי הבר מצווה',
-      description:
-        'אפשר להזכיר לתלמיד מתי פרשת השבוע שלו חוזרת, כדי להמשיך קשר, רגש וזיכרון גם שנים קדימה.',
-    },
-    {
-      title: 'שומרים את הקול של סבא',
-      description:
-        'מעלים הקלטות משפחתיות ומחברים בין מסורת, זיכרון ולימוד חי. הנכדים והנינים יוכלו ללמוד מאותו קול בעתיד.',
-    },
-  ] satisfies LandingHighlight[],
-  journey: [
-    {
-      title: 'המלמד בוחר נוסח ופותח ספריית פרשה',
-      description:
-        'החלוקה והמדיה נבנות פעם אחת בצורה מסודרת, עם אפשרות להעתיק, להתאים ולשמור ספריות שונות לפי צורך.',
-    },
-    {
-      title: 'התלמיד מקבל מסלול מדויק',
-      description:
-        'הוא רואה רק מה שרלוונטי אליו, יודע כמה נשאר עד הקריאה, ומתקדם דרך אודיו, וידאו, תמונות והקלטות.',
-    },
-    {
-      title: 'WhatsApp ממשיך את הליווי מחוץ לאתר',
-      description:
-        'תפריט בוט, תזכורות, הודעות למלמד וקישורים ישירים הופכים את התרגול לזמין גם תוך כדי היום־יום.',
-    },
-  ] satisfies LandingStep[],
-  imageSlots: {
-    heroImageUrl: '/marketing-ui/hero-main.jpg',
-    studentShowcaseImageUrl: '/marketing-ui/student-screen.jpg',
-    teacherShowcaseImageUrl: '/marketing-ui/teacher-dashboard.jpg',
-    whatsappShowcaseImageUrl: '/marketing-ui/whatsapp-screen.jpg',
-    legacyShowcaseImageUrl: '/marketing-ui/family-legacy.jpg',
-  },
-  studentSection: {
-    id: 'student-experience',
-    title: 'חוויה רגועה, צעירה וממוקדת לתלמיד',
+  whatsapp: {
+    id: 'marketing-whatsapp',
+    title: 'WhatsApp',
     description:
-      'המסכים בנויים במיוחד לעבודה מהטלפון: ניווט פשוט, מעט מלל, קטע ברור, סטטוס תרגול, הקלטה עצמית ופתיחת מדיה בגודל נוח.',
+      'גם מחוץ לאתר אפשר להמשיך את התהליך. שולחים הודעה לדוגמה, מקבלים בוט עם קטעים פתוחים, סטטיסטיקות והודעות למלמד.',
+    imageUrl: '/marketing-ui/whatsapp-screen.jpg',
+    imageAlt: 'דוגמת WhatsApp',
+    imageLabel: 'WhatsApp',
+    imageCaption: 'תצוגת הדמו מראה איך התלמיד מקבל קטעים, סטטיסטיקות וקישורים ישירים.',
+    phoneFieldLabel: 'מספר טלפון לקבלת דמו',
+    phoneFieldPlaceholder: 'למשל 054-1234567',
+    submitLabel: 'שליחת הודעת דמו',
+    helperText:
+      'אחרי קבלת ההודעה אפשר להשיב לבוט ולקבל גישה זמנית לתלמיד לדוגמה. אפשר גם לשלוח 100 להשארת פרטים דרך ה־WhatsApp.',
+    metaTemplateName: 'bar_mitzvah_demo_entry',
+    metaTemplateLanguageCode: 'he',
+    metaTemplateBodyParameters: [] as string[],
+    demoStudentId: 11,
+    demoSessionHours: 24,
+    detailsCommand: '100',
   },
-  whatsappSection: {
-    title: 'WhatsApp כחלק אמיתי מהלימוד',
+  contact: {
+    id: 'marketing-contact',
+    title: 'השארת פרטים',
     description:
-      'לא רק הודעות שיווקיות. המלמד יכול לשלוח תזכורת ממוקדת, התלמיד יכול לקבל תפריט קטעים, לראות סטטיסטיקות, ולפנות ישירות למלמד כשצריך.',
-  },
-  legacySection: {
-    title: 'הפרשה נשארת חיה גם במשפחה',
-    description:
-      'המערכת לא חייבת להיגמר ביום העלייה לתורה. אפשר לשמור בה הקלטות, סרטונים ותוכן משפחתי שילווה את הבית לשנים ארוכות.',
-  },
-  footer: {
-    title: 'רוצים להרגיש איך זה עובד באמת?',
-    description:
-      'אפשר להיכנס למערכת, לראות את חוויית התלמיד והמלמד, ולהמשיך לעצב את התוכן השיווקי המקומי בדיוק לשפה שמתאימה לכם.',
-    primaryCtaLabel: 'כניסה למסך ההתחברות',
-    primaryCtaHref: '/',
+      'כאן אפשר לשים תמחור, פרטי ליווי, מה כולל השירות ואיך נראה תהליך ההצטרפות.',
+    notificationPhone: '972542181248',
+    formTitle: 'נשאיר פרטים ונחזור אליך',
+    nameLabel: 'שם',
+    roleLabel: 'סוג ליווי',
+    phoneLabel: 'טלפון',
+    emailLabel: 'מייל',
+    notesLabel: 'הערות',
+    notesPlaceholder: 'כתבו כאן מה חשוב לכם, פרטי קריאה, גיל, סוג ליווי רצוי ועוד.',
+    submitLabel: 'שליחת פרטים',
+    roleOptions: [
+      { value: 'parent', label: 'הורה' },
+      { value: 'teacher', label: 'מלמד' },
+    ] satisfies MarketingLeadRoleOption[],
+    aboutProjectTitle: 'קצת על הפרויקט',
+    aboutProjectText:
+      'המערכת נולדה מתוך צורך אמיתי להפוך את לימוד בר המצווה למסודר, רגוע, זמין וידידותי גם לתלמיד, גם למלמד וגם לבית.',
   },
 } as const

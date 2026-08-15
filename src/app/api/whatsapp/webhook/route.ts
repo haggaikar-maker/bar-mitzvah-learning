@@ -1,6 +1,8 @@
 import {
   buildWhatsAppBotEmptyCatalogText,
   buildWhatsAppBotInvalidSelectionText,
+  buildWhatsAppBotLeadDetailsPromptText,
+  buildWhatsAppBotLeadDetailsSavedText,
   buildWhatsAppBotMenuText,
   buildWhatsAppBotSelectionText,
   buildWhatsAppBotStatsText,
@@ -10,13 +12,23 @@ import {
   buildWhatsAppTeacherInboxText,
   buildWhatsAppTeacherNoPendingSessionText,
   buildWhatsAppTeacherReplySentText,
+  getStudentWhatsAppCatalogWithSource,
   getStudentWhatsAppCatalogByPhoneWithSource,
   getStudentWhatsAppProgressSummary,
   parseWhatsAppBotSelection,
+  type StudentWhatsAppCatalog,
 } from '@/lib/whatsapp-bot'
+import {
+  buildMarketingLeadNotificationText,
+  getMarketingDemoSessionByPhone,
+  insertMarketingLead,
+  parseWhatsAppLeadDetailsMessage,
+  updateMarketingDemoSession,
+} from '@/lib/marketing-landing'
 import { createStudentDirectAccessLink } from '@/lib/student-direct-links'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { sanitizePhoneNumber, sendWhatsAppTextMessage } from '@/lib/whatsapp'
+import { landingPageContent } from '@/src/marketing-content/landing-page-content'
 
 type WhatsAppMessagesAdminClient = {
   from: (_table: 'whatsapp_messages') => {
@@ -422,11 +434,102 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
   checkpoints.getCatalogMs = phoneCatalog.catalog ? 0 : lookupElapsedMs
 
   if (!student) {
-    console.log('whatsapp webhook student not found', {
+    const marketingDemoSession = await getMarketingDemoSessionByPhone(rawPhone)
+
+    if (!marketingDemoSession) {
+      console.log('whatsapp webhook student not found', {
+        rawPhone,
+        studentLookupSource: phoneCatalog.studentSource,
+        timings: checkpoints,
+        totalMs: Date.now() - startedAt,
+      })
+      return
+    }
+
+    if (bodyText.trim() === '100') {
+      await updateMarketingDemoSession(marketingDemoSession.id, {
+        status: 'awaiting_details',
+      })
+      const demoCatalogResult = await getStudentWhatsAppCatalogWithSource(
+        marketingDemoSession.demo_student_id
+      )
+      await sendWhatsAppTextMessage({
+        to: rawPhone,
+        body: buildWhatsAppBotLeadDetailsPromptText(
+          demoCatalogResult.catalog.student.name
+        ),
+      })
+      return
+    }
+
+    if (marketingDemoSession.status === 'awaiting_details') {
+      const parsedLead = parseWhatsAppLeadDetailsMessage(bodyText)
+      await insertMarketingLead({
+        source: 'whatsapp_100',
+        fullName: parsedLead?.name ?? null,
+        role: parsedLead?.role ?? null,
+        phone: rawPhone,
+        email: parsedLead?.email ?? null,
+        notes: parsedLead?.notes ?? bodyText,
+        relatedDemoSessionId: marketingDemoSession.id,
+      })
+      await updateMarketingDemoSession(marketingDemoSession.id, {
+        status: 'completed',
+        lead_name: parsedLead?.name ?? null,
+        lead_role: parsedLead?.role ?? null,
+        lead_email: parsedLead?.email ?? null,
+        lead_notes: parsedLead?.notes ?? bodyText,
+      })
+
+      const marketingNotificationPhone = sanitizePhoneNumber(
+        landingPageContent.contact.notificationPhone
+      )
+      if (marketingNotificationPhone) {
+        try {
+          await sendWhatsAppTextMessage({
+            to: marketingNotificationPhone,
+            body: buildMarketingLeadNotificationText({
+              source: 'whatsapp_100',
+              fullName: parsedLead?.name ?? null,
+              role: parsedLead?.role ?? null,
+              phone: rawPhone,
+              email: parsedLead?.email ?? null,
+              notes: parsedLead?.notes ?? bodyText,
+            }),
+          })
+        } catch (notificationError) {
+          console.error(
+            'Failed to send WhatsApp notification for marketing demo lead',
+            notificationError
+          )
+        }
+      }
+
+      const demoCatalogResult = await getStudentWhatsAppCatalogWithSource(
+        marketingDemoSession.demo_student_id
+      )
+      await sendWhatsAppTextMessage({
+        to: rawPhone,
+        body: buildWhatsAppBotLeadDetailsSavedText(
+          demoCatalogResult.catalog.student.name
+        ),
+      })
+      return
+    }
+
+    const demoCatalogResult = await getStudentWhatsAppCatalogWithSource(
+      marketingDemoSession.demo_student_id
+    )
+    checkpoints.getCatalogMs = Date.now() - lookupStartedAt - checkpoints.findStudentMs
+
+    await handleResolvedStudentCatalogMessage({
       rawPhone,
-      studentLookupSource: phoneCatalog.studentSource,
-      timings: checkpoints,
-      totalMs: Date.now() - startedAt,
+      bodyText,
+      catalog: demoCatalogResult.catalog,
+      studentLookupSource: 'marketing-demo',
+      catalogSource: demoCatalogResult.source,
+      startedAt,
+      checkpoints,
     })
     return
   }
@@ -450,6 +553,35 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
     return
   }
 
+  await handleResolvedStudentCatalogMessage({
+    rawPhone,
+    bodyText,
+    catalog,
+    studentLookupSource: phoneCatalog.studentSource,
+    catalogSource: phoneCatalog.catalogSource,
+    startedAt,
+    checkpoints,
+  })
+}
+
+async function handleResolvedStudentCatalogMessage(input: {
+  rawPhone: string
+  bodyText: string
+  catalog: StudentWhatsAppCatalog
+  studentLookupSource: string
+  catalogSource: string
+  startedAt: number
+  checkpoints: {
+    findStudentMs: number
+    getCatalogMs: number
+    createLinkMs: number
+    sendMessageMs: number
+    logMessageMs: number
+  }
+}) {
+  const { rawPhone, bodyText, catalog, studentLookupSource, catalogSource, startedAt, checkpoints } =
+    input
+
   if (catalog.parts.length === 0) {
     console.log('whatsapp webhook empty catalog', {
       studentId: catalog.student.id,
@@ -461,7 +593,7 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
       to: rawPhone,
       body: buildWhatsAppBotEmptyCatalogText(catalog.student.name),
     })
-    checkpoints.sendMessageMs = Date.now() - lookupStartedAt - checkpoints.findStudentMs
+    checkpoints.sendMessageMs = 0
     console.log('whatsapp webhook sent empty catalog response', {
       to: rawPhone,
       timings: checkpoints,
@@ -474,7 +606,7 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
 
   console.log('whatsapp webhook parsed selection', {
     studentId: catalog.student.id,
-    catalogSource: phoneCatalog.catalogSource,
+    catalogSource,
     selection,
     availableParts: catalog.parts.map((part, index) => ({
       index: index + 1,
@@ -537,6 +669,14 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
         studentName: catalog.student.name,
         teacherName: teacher.display_name,
       }),
+    })
+    return
+  }
+
+  if (selection === 'leave_details') {
+    await sendWhatsAppTextMessage({
+      to: rawPhone,
+      body: buildWhatsAppBotLeadDetailsPromptText(catalog.student.name),
     })
     return
   }
@@ -725,8 +865,8 @@ async function handleIncomingStudentMessage(rawPhone: string, bodyText: string) 
   console.log('whatsapp webhook handled student message', {
     studentId: catalog.student.id,
     lessonPartId: selectedPart.lessonPartId,
-    studentLookupSource: phoneCatalog.studentSource,
-    catalogSource: phoneCatalog.catalogSource,
+    studentLookupSource,
+    catalogSource,
     timings: checkpoints,
     totalMs: Date.now() - startedAt,
   })

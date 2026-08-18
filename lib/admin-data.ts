@@ -260,23 +260,27 @@ export async function getAdminDashboardData(selected?: {
         'טבלת המנהלים עדיין לא זמינה, לכן ייתכן שחלק מפעולות הניהול לא יוצגו.'
       )
     } else {
-      availableAdmins = ((adminsFallback ?? []) as AdminRecord[]).map((admin) => ({
-        ...admin,
-        role: admin.role === 'teacher' ? 'teacher' : 'primary',
-        whatsapp_phone: null,
-        city: null,
-        email: null,
-      }))
+      availableAdmins = ((adminsFallback ?? []) as AdminRecord[])
+        .filter((admin) => admin.status !== 'inactive')
+        .map((admin) => ({
+          ...admin,
+          role: admin.role === 'teacher' ? 'teacher' : 'primary',
+          whatsapp_phone: null,
+          city: null,
+          email: null,
+        }))
       relationshipWarning = new Error(
         'שדות העיר והאימייל של המלמדים עדיין לא נוספו לבסיס הנתונים. כדי להשתמש בהם צריך להריץ את עדכון ה-SQL החדש.'
       )
     }
   } else {
-    availableAdmins = ((adminsWithContact ?? []) as AdminRecord[]).map((admin) => ({
-      ...admin,
-      role: admin.role === 'teacher' ? 'teacher' : 'primary',
-      whatsapp_phone: admin.whatsapp_phone ?? null,
-    }))
+    availableAdmins = ((adminsWithContact ?? []) as AdminRecord[])
+      .filter((admin) => admin.status !== 'inactive')
+      .map((admin) => ({
+        ...admin,
+        role: admin.role === 'teacher' ? 'teacher' : 'primary',
+        whatsapp_phone: admin.whatsapp_phone ?? null,
+      }))
   }
 
   const { data: teacherParashaLinks, error: teacherParashaLinksError } = await supabase
@@ -412,7 +416,9 @@ export async function getAdminDashboardData(selected?: {
     session?.role === 'teacher' && session.id
       ? hydratedStudents.filter((student) => student.admin_id === session.id)
       : session?.role === 'primary'
-        ? hydratedStudents
+        ? selected?.ownerAdminId
+          ? hydratedStudents.filter((student) => student.admin_id === selected.ownerAdminId)
+          : hydratedStudents
       : hydratedStudents
 
   const managerByStudentId = Object.fromEntries(
@@ -452,8 +458,13 @@ export async function getAdminDashboardData(selected?: {
     selected?.parashaId ?? filteredTeacherParashot[0]?.id ?? null
   const selectedSectionId =
     selected?.sectionId ?? availableSections[0]?.id ?? null
+  const normalizedTrackingStudentId =
+    selected?.trackingStudentId &&
+    visibleStudents.some((student) => student.id === selected.trackingStudentId)
+      ? selected.trackingStudentId
+      : null
   const selectedTrackingStudentId =
-    selected?.trackingStudentId ?? visibleStudents[0]?.id ?? null
+    normalizedTrackingStudentId ?? visibleStudents[0]?.id ?? null
 
   let lessonGroup: AdminLessonGroup | null = null
   let lessonParts: LessonPart[] = []

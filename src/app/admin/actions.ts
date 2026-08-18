@@ -1126,6 +1126,84 @@ export async function updateStudentPartVisibility(formData: FormData) {
   revalidatePath('/student')
 }
 
+export async function hideAllStudentTeacherParashaParts(formData: FormData) {
+  const returnPath = readString(formData, 'return_path') || '/admin'
+
+  try {
+    const session = await requireAdminSession()
+    const studentId = readNumber(formData, 'student_id')
+    const teacherParashaId = readNumber(formData, 'teacher_parasha_id')
+
+    if (!studentId || !teacherParashaId) {
+      throw new Error('חסרים מזהי תלמיד או ספריית פרשה להסתרת תתי־החלקים.')
+    }
+
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .select('id, admin_id, name')
+      .eq('id', studentId)
+      .maybeSingle()
+
+    if (studentError || !student) {
+      throw new Error(studentError?.message ?? 'התלמיד לא נמצא.')
+    }
+
+    if (session.role !== 'primary' && student.admin_id !== session.id) {
+      throw new Error('אין הרשאה להסתיר תתי־חלקים עבור תלמיד זה.')
+    }
+
+    const teacherParasha = await getManageableTeacherParasha(teacherParashaId, session)
+
+    const { data: groups, error: groupsError } = await supabase
+      .from('lesson_groups')
+      .select('id')
+      .eq('teacher_parasha_id', teacherParasha.id)
+
+    if (groupsError) {
+      throw new Error(groupsError.message)
+    }
+
+    const lessonGroupIds = ((groups ?? []) as Array<{ id: number }>).map((group) => group.id)
+
+    if (lessonGroupIds.length === 0) {
+      throw new Error('אין תתי־חלקים בספרייה הזאת.')
+    }
+
+    const { error: updateError } = await supabase
+      .from('lesson_parts')
+      .update({ is_visible_to_student: false })
+      .in('lesson_group_id', lessonGroupIds)
+
+    if (updateError) {
+      throw new Error(updateError.message)
+    }
+
+    await refreshWhatsAppCatalogForTeacherParasha(teacherParasha.id)
+
+    revalidatePath('/admin')
+    revalidatePath('/student')
+    redirect(
+      buildAdminActionRedirectPath({
+        returnPath,
+        status: 'success',
+        message: `כל תתי־החלקים של ${student.name} בספריית הפרשה הפעילה הוסתרו לתלמיד.`,
+      })
+    )
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw error
+    }
+
+    redirect(
+      buildAdminActionRedirectPath({
+        returnPath,
+        status: 'error',
+        message: error instanceof Error ? error.message : 'הסתרת תתי־החלקים נכשלה.',
+      })
+    )
+  }
+}
+
 export async function deleteStudentRecordingFromAdmin(formData: FormData) {
   const session = await requireAdminSession()
 
@@ -1879,22 +1957,74 @@ export async function deleteSection(formData: FormData) {
 }
 
 export async function deleteLessonPart(formData: FormData) {
-  const session = await requireAdminSession()
-  const id = readNumber(formData, 'id')
-  if (!id) throw new Error('חסר מזהה תת-חלק.')
+  const returnPath = readString(formData, 'return_path') || '/admin'
 
-  const lessonPart = await getManageableLessonPart(id, session)
-  const lessonGroup = await getManageableLessonGroup(lessonPart.lesson_group_id, session)
+  try {
+    const session = await requireAdminSession()
+    const id = readNumber(formData, 'id')
+    if (!id) throw new Error('חסר מזהה תת-חלק.')
 
-  const { error } = await supabase.from('lesson_parts').delete().eq('id', id)
-  if (error) throw new Error(error.message)
+    const lessonPart = await getManageableLessonPart(id, session)
+    const lessonGroup = await getManageableLessonGroup(lessonPart.lesson_group_id, session)
 
-  if (lessonGroup.teacher_parasha_id) {
-    await refreshWhatsAppCatalogForTeacherParasha(lessonGroup.teacher_parasha_id)
+    let successMessage = 'תת־החלק נמחק בהצלחה.'
+
+    if (lessonGroup.teacher_parasha_id) {
+      const { data: activeAssignments, error: activeAssignmentsError } = await supabase
+        .from('student_teacher_parasha_assignments')
+        .select('id')
+        .eq('teacher_parasha_id', lessonGroup.teacher_parasha_id)
+        .eq('status', 'active')
+
+      if (activeAssignmentsError) {
+        throw new Error(activeAssignmentsError.message)
+      }
+
+      if ((activeAssignments?.length ?? 0) > 0) {
+        const { error: hideError } = await supabase
+          .from('lesson_parts')
+          .update({ is_visible_to_student: false })
+          .eq('id', id)
+
+        if (hideError) {
+          throw new Error(hideError.message)
+        }
+
+        successMessage =
+          'לתת־החלק יש תלמידים פעילים משויכים, לכן הוא הוסתר לתלמידים במקום להימחק פיזית.'
+      } else {
+        const { error } = await supabase.from('lesson_parts').delete().eq('id', id)
+        if (error) throw new Error(error.message)
+      }
+
+      await refreshWhatsAppCatalogForTeacherParasha(lessonGroup.teacher_parasha_id)
+    } else {
+      const { error } = await supabase.from('lesson_parts').delete().eq('id', id)
+      if (error) throw new Error(error.message)
+    }
+
+    revalidatePath('/admin')
+    revalidatePath('/student')
+    redirect(
+      buildAdminActionRedirectPath({
+        returnPath,
+        status: 'success',
+        message: successMessage,
+      })
+    )
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw error
+    }
+
+    redirect(
+      buildAdminActionRedirectPath({
+        returnPath,
+        status: 'error',
+        message: error instanceof Error ? error.message : 'מחיקת תת־החלק נכשלה.',
+      })
+    )
   }
-
-  revalidatePath('/admin')
-  revalidatePath('/student')
 }
 
 export async function deleteLessonSlide(formData: FormData) {
@@ -1924,25 +2054,176 @@ export async function deleteLessonSlide(formData: FormData) {
 }
 
 export async function deleteAdmin(formData: FormData) {
-  const session = await requireAdminSession()
+  const returnPath = readString(formData, 'return_path') || '/admin'
 
-  if (session.role !== 'primary') {
-    throw new Error('רק מנהל ראשי יכול למחוק מנהלים.')
+  try {
+    const session = await requireAdminSession()
+
+    if (session.role !== 'primary') {
+      throw new Error('רק מנהל ראשי יכול למחוק מנהלים.')
+    }
+
+    const id = readNumber(formData, 'id')
+    if (!id) throw new Error('חסר מזהה מנהל.')
+    if (session.id === id) throw new Error('לא ניתן למחוק את המנהל שמחובר כרגע.')
+
+    const [
+      { data: linkedStudents, error: linkedStudentsError },
+      { data: ownedTeacherParashot, error: ownedTeacherParashotError },
+      { data: importBatches, error: importBatchesError },
+    ] = await Promise.all([
+      supabase.from('students').select('id, name').eq('admin_id', id),
+      supabase
+        .from('teacher_parasha_catalog_view')
+        .select('id, internal_display_name')
+        .eq('owner_admin_id', id),
+      supabase
+        .from('teacher_parasha_import_batches')
+        .select('id')
+        .eq('imported_by_admin_id', id),
+    ])
+
+    if (linkedStudentsError) throw new Error(linkedStudentsError.message)
+    if (ownedTeacherParashotError) throw new Error(ownedTeacherParashotError.message)
+    if (importBatchesError) throw new Error(importBatchesError.message)
+
+    if ((linkedStudents?.length ?? 0) > 0) {
+      const studentNames = (linkedStudents ?? [])
+        .slice(0, 4)
+        .map((student) => student.name)
+        .join(', ')
+
+      throw new Error(
+        `לא ניתן למחוק מנהל שיש לו תלמידים משויכים. קודם יש להעביר או למחוק את התלמידים המשויכים${studentNames ? `: ${studentNames}` : ''}.`
+      )
+    }
+
+    if ((ownedTeacherParashot?.length ?? 0) > 0) {
+      const teacherParashaIds = (ownedTeacherParashot ?? []).map((teacherParasha) => teacherParasha.id)
+
+      const { data: groups, error: groupsError } = await supabase
+        .from('lesson_groups')
+        .select('id, teacher_parasha_id')
+        .in('teacher_parasha_id', teacherParashaIds)
+
+      if (groupsError) {
+        throw new Error(groupsError.message)
+      }
+
+      const lessonGroupIds = ((groups ?? []) as Array<{ id: number; teacher_parasha_id: number }>).map(
+        (group) => group.id
+      )
+
+      if (lessonGroupIds.length > 0) {
+        const { error: hidePartsError } = await supabase
+          .from('lesson_parts')
+          .update({ is_visible_to_student: false })
+          .in('lesson_group_id', lessonGroupIds)
+
+        if (hidePartsError) {
+          throw new Error(hidePartsError.message)
+        }
+      }
+
+      const { error: archiveLibrariesError } = await supabase
+        .from('teacher_parashot')
+        .update({
+          status: 'archived',
+          archived_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .in('id', teacherParashaIds)
+
+      if (archiveLibrariesError) {
+        throw new Error(archiveLibrariesError.message)
+      }
+
+      for (const teacherParashaId of teacherParashaIds) {
+        await refreshWhatsAppCatalogForTeacherParasha(teacherParashaId)
+      }
+
+      const { error: deactivateAdminError } = await supabase
+        .from('admins')
+        .update({
+          status: 'inactive',
+          deactivated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+
+      if (deactivateAdminError) {
+        throw new Error(deactivateAdminError.message)
+      }
+
+      revalidatePath('/admin')
+      redirect(
+        buildAdminActionRedirectPath({
+          returnPath,
+          status: 'success',
+          message:
+            'למלמד לא היו תלמידים, לכן הספריות שלו הועברו לארכיון ותתי־החלקים הוסתרו. לאחר מכן המלמד הוסר מהרשימה.',
+        })
+      )
+    }
+
+    if ((importBatches?.length ?? 0) > 0) {
+      const { error: deactivateAdminError } = await supabase
+        .from('admins')
+        .update({
+          status: 'inactive',
+          deactivated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+
+      if (deactivateAdminError) {
+        throw new Error(deactivateAdminError.message)
+      }
+
+      revalidatePath('/admin')
+      redirect(
+        buildAdminActionRedirectPath({
+          returnPath,
+          status: 'success',
+          message:
+            'למלמד היו נתוני ייבוא שמורים, לכן הוא סומן כלא פעיל והוסר מהרשימה במקום מחיקה פיזית.',
+        })
+      )
+    }
+
+    const { error } = await supabase.from('admins').delete().eq('id', id)
+    if (error) {
+      if (
+        error.message.includes('violates foreign key constraint') ||
+        error.message.includes('is still referenced')
+      ) {
+        throw new Error(
+          'לא ניתן למחוק את המנהל כי עדיין יש נתונים משויכים אליו במערכת. צריך קודם לנתק תלמידים, ספריות או ייבואים משויכים.'
+        )
+      }
+
+      throw new Error(error.message)
+    }
+
+    revalidatePath('/admin')
+    redirect(
+      buildAdminActionRedirectPath({
+        returnPath,
+        status: 'success',
+        message: 'המנהל נמחק בהצלחה.',
+      })
+    )
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw error
+    }
+
+    redirect(
+      buildAdminActionRedirectPath({
+        returnPath,
+        status: 'error',
+        message: error instanceof Error ? error.message : 'מחיקת המנהל נכשלה.',
+      })
+    )
   }
-
-  const id = readNumber(formData, 'id')
-  if (!id) throw new Error('חסר מזהה מנהל.')
-  if (session.id === id) throw new Error('לא ניתן למחוק את המנהל שמחובר כרגע.')
-
-  const { error } = await supabase
-    .from('admins')
-    .update({
-      status: 'inactive',
-      deactivated_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-  if (error) throw new Error(error.message)
-  revalidatePath('/admin')
 }
 
 export async function upsertTeacherParasha(formData: FormData) {
@@ -2067,21 +2348,75 @@ export async function setTeacherParashaStatus(formData: FormData) {
 }
 
 export async function deleteTeacherParasha(formData: FormData) {
-  const session = await requireAdminSession()
-  const id = readNumber(formData, 'id')
+  const returnPath = readString(formData, 'return_path') || '/admin'
 
-  if (!id) {
-    throw new Error('חסר מזהה ספריית פרשה.')
+  try {
+    const session = await requireAdminSession()
+    const id = readNumber(formData, 'id')
+
+    if (!id) {
+      throw new Error('חסר מזהה ספריית פרשה.')
+    }
+
+    await getManageableTeacherParasha(id, session)
+
+    const { data: groups, error: groupsError } = await supabase
+      .from('lesson_groups')
+      .select('id')
+      .eq('teacher_parasha_id', id)
+
+    if (groupsError) {
+      throw new Error(groupsError.message)
+    }
+
+    const lessonGroupIds = ((groups ?? []) as Array<{ id: number }>).map((group) => group.id)
+
+    if (lessonGroupIds.length > 0) {
+      const { error: hidePartsError } = await supabase
+        .from('lesson_parts')
+        .update({ is_visible_to_student: false })
+        .in('lesson_group_id', lessonGroupIds)
+
+      if (hidePartsError) {
+        throw new Error(hidePartsError.message)
+      }
+    }
+
+    const { error: archiveError } = await supabase
+      .from('teacher_parashot')
+      .update({
+        status: 'archived',
+        archived_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+
+    if (archiveError) {
+      throw new Error(archiveError.message)
+    }
+
+    await refreshWhatsAppCatalogForTeacherParasha(id)
+
+    revalidatePath('/admin')
+    revalidatePath('/student')
+    redirect(
+      buildAdminActionRedirectPath({
+        returnPath,
+        status: 'success',
+        message: 'ספריית הפרשה הועברה לארכיון וכל תתי־החלקים שלה הוסתרו, בלי לשבור קישורים קיימים.',
+      })
+    )
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw error
+    }
+
+    redirect(
+      buildAdminActionRedirectPath({
+        returnPath,
+        status: 'error',
+        message: error instanceof Error ? error.message : 'מחיקת ספריית הפרשה נכשלה.',
+      })
+    )
   }
-
-  await getManageableTeacherParasha(id, session)
-
-  const { error } = await supabase.from('teacher_parashot').delete().eq('id', id)
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  revalidatePath('/admin')
-  revalidatePath('/student')
 }

@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react'
 import { useMemo, useTransition } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import type { AdminSection, AdminTeacherParasha } from '@/lib/admin-data'
+import type { AdminRecord, AdminSection, AdminTeacherParasha } from '@/lib/admin-data'
 import type { LessonPart } from '@/lib/practice-data'
 import { CenteredLoadingState } from '../../components/centered-loading-state'
 
@@ -27,17 +27,56 @@ type AdminQueryFormProps = {
   children: ReactNode
   className?: string
   hash?: string
+  autoSubmitOnChange?: boolean
+}
+
+type AdminEditorNavigatorStudent = {
+  id: number
+  name: string
+  admin_id: number | null
+  active_teacher_parasha_id?: number | null
+}
+
+type AdminEditorNavigatorProps = {
+  admins: AdminRecord[]
+  students: AdminEditorNavigatorStudent[]
+  teacherParashot: AdminTeacherParasha[]
+  selectedOwnerAdminId: number | null
+  selectedStudentId: number | null
+  selectedParashaId: number | null
 }
 
 export function AdminQueryForm({
   children,
   className,
   hash,
+  autoSubmitOnChange = false,
 }: AdminQueryFormProps) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [isPending, startTransition] = useTransition()
+
+  function navigateWithForm(formData: FormData) {
+    const nextParams = new URLSearchParams(searchParams.toString())
+
+    for (const [key, value] of formData.entries()) {
+      const normalizedValue = typeof value === 'string' ? value.trim() : ''
+
+      if (normalizedValue) {
+        nextParams.set(key, normalizedValue)
+      } else {
+        nextParams.delete(key)
+      }
+    }
+
+    startTransition(() => {
+      router.replace(
+        `${pathname}?${nextParams.toString()}${hash ? `#${hash}` : ''}`,
+        { scroll: false }
+      )
+    })
+  }
 
   return (
     <>
@@ -46,25 +85,23 @@ export function AdminQueryForm({
         onSubmit={(event) => {
           event.preventDefault()
 
-          const formData = new FormData(event.currentTarget)
-          const nextParams = new URLSearchParams(searchParams.toString())
-
-          for (const [key, value] of formData.entries()) {
-            const normalizedValue = typeof value === 'string' ? value.trim() : ''
-
-            if (normalizedValue) {
-              nextParams.set(key, normalizedValue)
-            } else {
-              nextParams.delete(key)
-            }
+          navigateWithForm(new FormData(event.currentTarget))
+        }}
+        onChange={(event) => {
+          if (!autoSubmitOnChange) {
+            return
           }
 
-          startTransition(() => {
-            router.replace(
-              `${pathname}?${nextParams.toString()}${hash ? `#${hash}` : ''}`,
-              { scroll: false }
-            )
-          })
+          const target = event.target
+          if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement)) {
+            return
+          }
+
+          if (!target.form) {
+            return
+          }
+
+          navigateWithForm(new FormData(target.form))
         }}
       >
         {children}
@@ -73,6 +110,137 @@ export function AdminQueryForm({
         <CenteredLoadingState
           label="טוען..."
           subtitle="מעדכן את הסינון והנתונים על המסך"
+        />
+      ) : null}
+    </>
+  )
+}
+
+export function AdminEditorNavigator({
+  admins,
+  students,
+  teacherParashot,
+  selectedOwnerAdminId,
+  selectedStudentId,
+  selectedParashaId,
+}: AdminEditorNavigatorProps) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const [isPending, startTransition] = useTransition()
+
+  const selectedOwnerAdminIdValue = selectedOwnerAdminId?.toString() ?? 'all'
+  const selectedStudentIdValue = selectedStudentId?.toString() ?? ''
+  const selectedParashaIdValue = selectedParashaId?.toString() ?? ''
+
+  const filteredStudents = useMemo(
+    () =>
+      selectedOwnerAdminId
+        ? students.filter((student) => student.admin_id === selectedOwnerAdminId)
+        : students,
+    [selectedOwnerAdminId, students]
+  )
+
+  const filteredTeacherParashot = useMemo(
+    () =>
+      selectedOwnerAdminId
+        ? teacherParashot.filter((teacherParasha) => teacherParasha.owner_admin_id === selectedOwnerAdminId)
+        : teacherParashot,
+    [selectedOwnerAdminId, teacherParashot]
+  )
+
+  function replaceParams(updates: Record<string, string | null | undefined>) {
+    const nextParams = new URLSearchParams(searchParams.toString())
+
+    for (const [key, value] of Object.entries(updates)) {
+      if (value && value.trim()) {
+        nextParams.set(key, value)
+      } else {
+        nextParams.delete(key)
+      }
+    }
+
+    startTransition(() => {
+      router.replace(`${pathname}?${nextParams.toString()}#content-editor`, {
+        scroll: false,
+      })
+    })
+  }
+
+  return (
+    <>
+      <div className="grid gap-4 md:grid-cols-3">
+        <select
+          value={selectedOwnerAdminIdValue}
+          onChange={(event) => {
+            const nextOwnerAdminId = event.target.value
+            replaceParams({
+              ownerAdminId: nextOwnerAdminId || null,
+              studentId: null,
+              parashaId: null,
+              sectionId: null,
+              partId: null,
+            })
+          }}
+          className="rounded-2xl border border-slate-200 px-4 py-3"
+        >
+          <option value="all">כל המלמדים</option>
+          {admins.map((admin) => (
+            <option key={admin.id} value={admin.id}>
+              {admin.display_name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={selectedStudentIdValue}
+          onChange={(event) => {
+            const nextStudentId = event.target.value
+            const selectedStudent = students.find((student) => student.id === Number(nextStudentId))
+
+            replaceParams({
+              ownerAdminId: selectedStudent?.admin_id ? String(selectedStudent.admin_id) : selectedOwnerAdminIdValue || 'all',
+              studentId: nextStudentId || null,
+              parashaId: selectedStudent?.active_teacher_parasha_id
+                ? String(selectedStudent.active_teacher_parasha_id)
+                : null,
+              sectionId: null,
+              partId: null,
+            })
+          }}
+          className="rounded-2xl border border-slate-200 px-4 py-3"
+        >
+          <option value="">בחירת תלמיד</option>
+          {filteredStudents.map((student) => (
+            <option key={student.id} value={student.id}>
+              {student.name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={selectedParashaIdValue}
+          onChange={(event) => {
+            replaceParams({
+              parashaId: event.target.value || null,
+              sectionId: null,
+              partId: null,
+            })
+          }}
+          className="rounded-2xl border border-slate-200 px-4 py-3"
+        >
+          <option value="">בחירת ספריית פרשה</option>
+          {filteredTeacherParashot.map((teacherParasha) => (
+            <option key={teacherParasha.id} value={teacherParasha.id}>
+              {teacherParasha.internal_display_name} | {teacherParasha.owner_display_name} | {teacherParasha.nusach_name}
+            </option>
+          ))}
+        </select>
+      </div>
+      {isPending ? (
+        <CenteredLoadingState
+          label="טוען עריכה..."
+          subtitle="מעדכן את המלמד, התלמיד והספרייה לעריכה"
         />
       ) : null}
     </>

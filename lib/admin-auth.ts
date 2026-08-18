@@ -82,11 +82,15 @@ export async function getAdminSession() {
 
   const { data, error } = await supabase
     .from('admins')
-    .select('id, username, display_name, role')
+    .select('id, username, display_name, role, status')
     .eq('id', adminId)
     .maybeSingle()
 
   if (error || !data) {
+    return null
+  }
+
+  if (data.status === 'inactive') {
     return null
   }
 

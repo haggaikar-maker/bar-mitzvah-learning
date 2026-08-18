@@ -3,7 +3,6 @@ import type { ReactNode } from 'react'
 import { redirect } from 'next/navigation'
 import { getAdminDashboardData } from '@/lib/admin-data'
 import { getAdminSession } from '@/lib/admin-auth'
-import { createTorahBuilderLaunchUrl } from '@/lib/torah-builder-handoff'
 import { getLessonMediaKindLabel } from '@/lib/lesson-media'
 import {
   formatGregorianDate,
@@ -14,31 +13,27 @@ import { supabase } from '@/lib/supabase'
 import {
   copyParashaStructure,
   deleteTeacherParasha,
-  deleteAdmin,
   deleteLessonPart,
   deleteLessonSlide,
   deleteStudentRecordingFromAdmin,
   deleteStudent,
   ensureLessonGroup,
+  hideAllStudentTeacherParashaParts,
   logoutAdmin,
   setTeacherParashaStatus,
-  updateMyShareCode,
   resetStudentPartProgress,
   saveWhatsAppTemplate,
   sendStudentWhatsAppBotMenuMessage,
   sendStudentWhatsAppPracticeMessage,
   updateStudentPartVisibility,
-  upsertAdmin,
   upsertLessonPart,
   upsertLessonSlide,
-  upsertParasha,
-  upsertSection,
   upsertStudent,
   upsertTeacherParasha,
 } from './actions'
 import { AudioDuration } from './audio-duration'
 import { DirectVideoUpload } from './direct-video-upload'
-import { AdminContentSelector, AdminQueryForm } from './selectors'
+import { AdminContentSelector, AdminEditorNavigator, AdminQueryForm } from './selectors'
 import { PendingSubmitButton } from '../../components/pending-submit-button'
 
 type SectionContentSummary = {
@@ -91,10 +86,6 @@ function getTeacherParashaStatusClass(status: string) {
   }
 }
 
-function getBuilderExpiryTimestamp() {
-  return Math.floor(Date.now() / 1000) + 60 * 10
-}
-
 function DisclosureSection({
   title,
   description,
@@ -133,21 +124,41 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     redirect('/')
   }
 
+  const hasOwnerAdminIdParam = Object.prototype.hasOwnProperty.call(
+    resolvedSearchParams,
+    'ownerAdminId'
+  )
+  const ownerAdminIdParamValue = toStringParam(resolvedSearchParams.ownerAdminId)
   const selectedParashaId = toNumber(resolvedSearchParams.parashaId)
   const selectedSectionId = toNumber(resolvedSearchParams.sectionId)
   const selectedPartId = toNumber(resolvedSearchParams.partId)
   const parsedTrackingStudentId = toNumber(resolvedSearchParams.trackingStudentId)
-  const selectedOwnerAdminId = toNumber(resolvedSearchParams.ownerAdminId)
+  const selectedOwnerAdminId =
+    ownerAdminIdParamValue === 'all' ? null : toNumber(resolvedSearchParams.ownerAdminId)
   const selectedTeacherParashaStatus = toStringParam(resolvedSearchParams.teacherParashaStatus)
   const selectedBaseParashaFilterId = toNumber(resolvedSearchParams.baseParashaFilterId)
   const selectedNusachFilterId = toNumber(resolvedSearchParams.nusachFilterId)
   const selectedLibraryView = toStringParam(resolvedSearchParams.libraryView) || 'single'
   const selectedStudentView = toStringParam(resolvedSearchParams.studentView) || 'single'
-  const selectedAdminView = toStringParam(resolvedSearchParams.adminView) || 'single'
   const selectedStudentCardId = toNumber(resolvedSearchParams.studentId)
-  const selectedAdminCardId = toNumber(resolvedSearchParams.adminId)
   const whatsappStatus = toStringParam(resolvedSearchParams.waStatus)
   const whatsappMessage = toStringParam(resolvedSearchParams.waMessage)
+  const ownerAdminSelectValue =
+    session.role === 'primary'
+      ? hasOwnerAdminIdParam
+        ? ownerAdminIdParamValue === 'all'
+          ? 'all'
+          : (selectedOwnerAdminId?.toString() ?? '')
+        : (session.id?.toString() ?? '')
+      : (session.id?.toString() ?? '')
+  const effectiveOwnerAdminId =
+    session.role === 'primary'
+      ? hasOwnerAdminIdParam
+        ? ownerAdminIdParamValue === 'all'
+          ? null
+          : selectedOwnerAdminId
+        : (session.id ?? null)
+      : (session.id ?? null)
 
   const {
     parashot,
@@ -157,7 +168,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     sections,
     students,
     admins,
-    managerByStudentId,
     lessonGroup,
     lessonParts,
     lessonSlides,
@@ -173,7 +183,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     sectionId: selectedSectionId,
     partId: selectedPartId,
     trackingStudentId: parsedTrackingStudentId,
-    ownerAdminId: selectedOwnerAdminId,
+    ownerAdminId: effectiveOwnerAdminId,
     teacherParashaStatus: selectedTeacherParashaStatus || null,
     baseParashaFilterId: selectedBaseParashaFilterId,
     nusachFilterId: selectedNusachFilterId,
@@ -190,54 +200,56 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
       ? 'video'
       : 'audio_slides'
   const selectedPartPrimarySlide = lessonSlides[0] ?? null
-  const currentAdminQuery = new URLSearchParams()
-  if (activeParashaId) currentAdminQuery.set('parashaId', String(activeParashaId))
-  if (activeSectionId) currentAdminQuery.set('sectionId', String(activeSectionId))
-  if (activePartId) currentAdminQuery.set('partId', String(activePartId))
-  const adminReturnPath = currentAdminQuery.size > 0 ? `/admin?${currentAdminQuery.toString()}` : '/admin'
-  const ownerUserId = session.id ? `admin:${session.id}` : `admin-env:${session.username}`
-  const mainSiteUrl = process.env.MAIN_SITE_URL
-  const builderCallbackUrl = mainSiteUrl
-    ? `${mainSiteUrl.replace(/\/$/, '')}/api/torah-builder/attach`
-    : undefined
-  const builderLaunchUrl =
-    selectedTeacherParasha && selectedPart
-      ? createTorahBuilderLaunchUrl({
-          ownerUserId,
-          teacherName: session.displayName,
-          sourceApp: 'bar-mitzvah-learning',
-          returnUrl: adminReturnPath,
-          callbackUrl: builderCallbackUrl,
-          lessonId: String(selectedPart.id),
-          parashaId: String(selectedTeacherParasha.id),
-          exp: getBuilderExpiryTimestamp(),
-        })
-      : null
-  const unassignedStudents = students.filter(
-    (student) => !managerByStudentId[student.id]
-  ).length
   const trackingRows = trackingSummary?.rows ?? []
   const selectedLibraryCardId = activeParashaId ?? teacherParashot[0]?.id ?? null
+  const filteredStudentsForTeacher =
+    effectiveOwnerAdminId
+      ? students.filter((student) => student.admin_id === effectiveOwnerAdminId)
+      : students
+  const normalizedSelectedStudentCardId =
+    selectedStudentCardId &&
+    filteredStudentsForTeacher.some((student) => student.id === selectedStudentCardId)
+      ? selectedStudentCardId
+      : null
   const selectedStudentCard =
-    students.find((student) => student.id === selectedStudentCardId) ?? students[0] ?? null
-  const selectedAdminCard =
-    admins.find((admin) => admin.id === selectedAdminCardId) ?? admins[0] ?? null
+    filteredStudentsForTeacher.find((student) => student.id === normalizedSelectedStudentCardId) ??
+    filteredStudentsForTeacher[0] ??
+    null
   const visibleTeacherParashot =
     selectedLibraryView === 'all'
       ? teacherParashot
       : teacherParashot.filter((parasha) => parasha.id === selectedLibraryCardId)
   const visibleStudents =
     selectedStudentView === 'all'
-      ? students
+      ? filteredStudentsForTeacher
       : selectedStudentCard
-        ? students.filter((student) => student.id === selectedStudentCard.id)
+        ? filteredStudentsForTeacher.filter((student) => student.id === selectedStudentCard.id)
         : []
-  const visibleAdmins =
-    selectedAdminView === 'all'
-      ? admins
-      : selectedAdminCard
-        ? admins.filter((admin) => admin.id === selectedAdminCard.id)
-        : []
+  const selectedTeacherRecord =
+    admins.find((admin) => admin.id === effectiveOwnerAdminId) ?? null
+  const studentsByTeacherParashaId = new Map<number, typeof students>()
+  const teacherParashaById = new Map(
+    allTeacherParashot.map((teacherParasha) => [teacherParasha.id, teacherParasha] as const)
+  )
+
+  for (const student of students) {
+    if (!student.active_teacher_parasha_id) {
+      continue
+    }
+
+    const current = studentsByTeacherParashaId.get(student.active_teacher_parasha_id) ?? []
+    current.push(student)
+    studentsByTeacherParashaId.set(student.active_teacher_parasha_id, current)
+  }
+
+  const selectedLibraryStudents =
+    selectedTeacherParasha
+      ? studentsByTeacherParashaId.get(selectedTeacherParasha.id) ?? []
+      : []
+  const selectedStudentTeacherParasha =
+    selectedStudentCard?.active_teacher_parasha_id
+      ? teacherParashaById.get(selectedStudentCard.active_teacher_parasha_id) ?? null
+      : null
   const trackingReadingCountdown = trackingSummary
     ? getReadingCountdownLabel(trackingSummary.student.torah_reading_date)
     : null
@@ -328,60 +340,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     }
   }
 
-  let contentParashaCount = 0
-  let contentSectionCount = 0
-
-  if (allTeacherParashot.length > 0) {
-    const { data: visibleGroups } = await supabase
-      .from('lesson_groups')
-      .select('id, teacher_parasha_id, section_id')
-      .in(
-        'teacher_parasha_id',
-        allTeacherParashot.map((teacherParasha) => teacherParasha.id)
-      )
-
-    const allGroups = (visibleGroups ?? []) as Array<{
-      id: number
-      teacher_parasha_id: number
-      section_id: number
-    }>
-
-    if (allGroups.length > 0) {
-      const { data: visibleParts } = await supabase
-        .from('lesson_parts')
-        .select('lesson_group_id')
-        .in(
-          'lesson_group_id',
-          allGroups.map((group) => group.id)
-        )
-
-      const groupIdsWithParts = new Set(
-        ((visibleParts ?? []) as Array<{ lesson_group_id: number }>).map(
-          (part) => part.lesson_group_id
-        )
-      )
-
-      const teacherParashaIdsWithParts = new Set<number>()
-      const sectionIdsWithParts = new Set<number>()
-
-      for (const group of allGroups) {
-        if (!groupIdsWithParts.has(group.id)) {
-          continue
-        }
-
-        teacherParashaIdsWithParts.add(group.teacher_parasha_id)
-        sectionIdsWithParts.add(group.section_id)
-      }
-
-      contentParashaCount = new Set(
-        allTeacherParashot
-          .filter((teacherParasha) => teacherParashaIdsWithParts.has(teacherParasha.id))
-          .map((teacherParasha) => teacherParasha.parasha_id)
-      ).size
-      contentSectionCount = sectionIdsWithParts.size
-    }
-  }
-
   return (
     <main className="min-h-screen bg-slate-50 p-4 sm:p-6">
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
@@ -392,13 +350,18 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               שלום {session.displayName}
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600">
-              מכאן אפשר לנהל תלמידים, פרשות, חלקים, תתי־חלקים, קבצי אודיו
-              ושקופיות. הגרסה הזאת כבר עובדת על הטבלאות הקיימות שלך. לשיוך
-              קבוע מנהל↔תלמידים נצטרך להוסיף טבלת מנהלים/שיוכים ב־SQL.
+              דף זה מתמקד עכשיו בעבודה השוטפת: בחירת מלמד, תלמיד, ספריית פרשה ועריכת התוכן בפועל.
+              כלי התחזוקה הרחבים זמינים בדף הניהול המתקדם.
             </p>
           </div>
 
           <div className="flex gap-3">
+            <Link
+              href="/admin/advanced"
+              className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
+            >
+              ניהול מתקדם
+            </Link>
             <Link
               href="/student"
               className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700"
@@ -433,35 +396,78 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           </div>
         ) : null}
 
-        <div className="order-4 grid gap-4 md:grid-cols-4">
-          <div className="rounded-3xl bg-white p-5 ring-1 ring-slate-200">
-            <p className="text-sm text-slate-500">פרשות</p>
-            <p className="mt-2 text-3xl font-black text-slate-900">{contentParashaCount}</p>
-          </div>
-          <div className="rounded-3xl bg-white p-5 ring-1 ring-slate-200">
-            <p className="text-sm text-slate-500">חלקים ראשיים</p>
-            <p className="mt-2 text-3xl font-black text-slate-900">{contentSectionCount}</p>
-          </div>
-          <div className="rounded-3xl bg-white p-5 ring-1 ring-slate-200">
-            <p className="text-sm text-slate-500">תלמידים נראים</p>
-            <p className="mt-2 text-3xl font-black text-slate-900">{students.length}</p>
-          </div>
-          <div className="rounded-3xl bg-white p-5 ring-1 ring-slate-200">
-            <p className="text-sm text-slate-500">ללא שיוך מנהל</p>
-            <p className="mt-2 text-3xl font-black text-slate-900">{unassignedStudents}</p>
-          </div>
+        <div className="order-2 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+          <section className="rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200">
+            <h2 className="text-2xl font-bold text-slate-900">בחירה וניווט מהיר</h2>
+            <p className="mt-2 text-sm leading-7 text-slate-600">
+              מתחילים ממלמד, ממשיכים לתלמיד או לספריית הפרשה שלו, ואז יורדים לעריכת התוכן.
+            </p>
+            <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <a
+                href="#tracking-panel"
+                className="rounded-2xl bg-slate-900 px-4 py-3 text-center text-sm font-semibold text-white"
+              >
+                מעקב תרגולים
+              </a>
+              <a
+                href="#content-editor"
+                className="rounded-2xl bg-blue-600 px-4 py-3 text-center text-sm font-semibold text-white"
+              >
+                עריכת פרשה
+              </a>
+              <a
+                href="#teacher-libraries"
+                className="rounded-2xl bg-slate-100 px-4 py-3 text-center text-sm font-semibold text-slate-800"
+              >
+                ספריות פרשה
+              </a>
+              <a
+                href="/admin/advanced"
+                className="rounded-2xl bg-slate-100 px-4 py-3 text-center text-sm font-semibold text-slate-800"
+              >
+                ניהול והגדרות
+              </a>
+            </div>
+          </section>
+
+          <section className="rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200">
+            <h2 className="text-xl font-bold text-slate-900">סינון פעיל</h2>
+            <div className="mt-4 space-y-3 text-sm text-slate-600">
+              <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">
+                <div className="text-xs text-slate-500">מלמד פעיל</div>
+                <div className="mt-1 text-lg font-bold text-slate-900">
+                  {selectedTeacherRecord?.display_name ?? 'כל המלמדים'}
+                </div>
+              </div>
+              <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">
+                <div className="text-xs text-slate-500">תלמידים בסינון</div>
+                <div className="mt-1 text-lg font-bold text-slate-900">
+                  {filteredStudentsForTeacher.length}
+                </div>
+              </div>
+              <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">
+                <div className="text-xs text-slate-500">ספרייה פתוחה לעריכה</div>
+                <div className="mt-1 text-lg font-bold text-slate-900">
+                  {selectedTeacherParasha?.internal_display_name ?? 'עדיין לא נבחרה'}
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
 
-        <div className="order-3">
+        <div id="tracking-panel" className="order-3">
         <DisclosureSection
           title="מעקב תרגולים והשלמות"
-          description="בחר תלמיד כדי לראות עבור כל תת־חלק כמה פעמים תרגל, כמה השלמות נרשמו, והאם הקטע זמין לתלמיד."
+          description="בחר קודם מלמד, ואז תלמיד מתוך הרשימה שלו. כך המעקב נשאר נקי ורלוונטי רק למי שאתה עובד עליו."
         >
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div />
           </div>
 
-          <AdminQueryForm className="mt-6 grid gap-3 md:grid-cols-[1fr_auto]">
+          <AdminQueryForm
+            className="mt-6 grid gap-3 md:grid-cols-[14rem_1fr]"
+            autoSubmitOnChange
+          >
             <input
               type="hidden"
               name="parashaId"
@@ -477,24 +483,38 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               name="partId"
               value={activePartId ?? ''}
             />
+            {session.role === 'primary' ? (
+              <select
+                name="ownerAdminId"
+                defaultValue={ownerAdminSelectValue}
+                className="rounded-2xl border border-slate-200 px-4 py-3"
+              >
+                <option value="all">כל המלמדים</option>
+                {admins.map((admin) => (
+                  <option key={admin.id} value={admin.id}>
+                    {admin.display_name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input type="hidden" name="ownerAdminId" value={session.id ?? ''} />
+            )}
             <select
               name="trackingStudentId"
-              defaultValue={selectedTrackingStudentId ?? ''}
+              defaultValue={
+                filteredStudentsForTeacher.some((student) => student.id === selectedTrackingStudentId)
+                  ? (selectedTrackingStudentId ?? '')
+                  : ''
+              }
               className="rounded-2xl border border-slate-200 px-4 py-3"
             >
               <option value="">בחר תלמיד למעקב</option>
-              {students.map((student) => (
+              {filteredStudentsForTeacher.map((student) => (
                 <option key={student.id} value={student.id}>
                   {student.name}
                 </option>
               ))}
             </select>
-            <button
-              type="submit"
-              className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
-            >
-              הצגת מעקב
-            </button>
           </AdminQueryForm>
 
           {trackingSummary ? (
@@ -820,172 +840,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         </DisclosureSection>
         </div>
 
-        {session.role === 'primary' ? (
-          <div className="order-8">
-            <DisclosureSection
-              title="ניהול מנהלים"
-              description="מנהל ראשי יכול להוסיף מנהלים, לשנות תפקיד, ולעדכן פרטי כניסה. כברירת מחדל מוצג מנהל אחד בלבד."
-            >
-              <AdminQueryForm className="grid gap-3 rounded-3xl bg-slate-50 p-4 md:grid-cols-[12rem_1fr_auto]">
-                <select
-                  name="adminView"
-                  defaultValue={selectedAdminView}
-                  className="rounded-2xl border border-slate-200 px-4 py-3"
-                >
-                  <option value="single">מנהל אחד</option>
-                  <option value="all">כל המנהלים</option>
-                </select>
-                <select
-                  name="adminId"
-                  defaultValue={selectedAdminCard?.id ?? ''}
-                  className="rounded-2xl border border-slate-200 px-4 py-3"
-                >
-                  <option value="">בחירת מנהל</option>
-                  {admins.map((admin) => (
-                    <option key={admin.id} value={admin.id}>
-                      {admin.display_name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="submit"
-                  className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
-                >
-                  סינון
-                </button>
-              </AdminQueryForm>
-              <div className="mt-6 grid gap-6 xl:grid-cols-2">
-                <div className="space-y-4">
-                  {visibleAdmins.length > 0 ? visibleAdmins.map((admin) => (
-                    <form key={admin.id} action={upsertAdmin} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
-                      <input type="hidden" name="id" value={admin.id} />
-                      <input
-                        name="display_name"
-                        defaultValue={admin.display_name}
-                        className="rounded-2xl border border-slate-200 px-4 py-3"
-                      />
-                      <input
-                        name="username"
-                        defaultValue={admin.username}
-                        className="rounded-2xl border border-slate-200 px-4 py-3"
-                      />
-                      <input
-                        name="whatsapp_phone"
-                        defaultValue={admin.whatsapp_phone ?? ''}
-                        placeholder="מספר WhatsApp, למשל 9725..."
-                        className="rounded-2xl border border-slate-200 px-4 py-3"
-                      />
-                      <input
-                        name="city"
-                        defaultValue={admin.city ?? ''}
-                        placeholder="עיר / יישוב"
-                        className="rounded-2xl border border-slate-200 px-4 py-3"
-                      />
-                      <input
-                        name="email"
-                        type="email"
-                        defaultValue={admin.email ?? ''}
-                        placeholder="אימייל"
-                        className="rounded-2xl border border-slate-200 px-4 py-3"
-                      />
-                      <input
-                        name="password"
-                        type="password"
-                        placeholder="סיסמה חדשה אם רוצים לעדכן"
-                        className="rounded-2xl border border-slate-200 px-4 py-3"
-                      />
-                      <select
-                        name="role"
-                        defaultValue={admin.role}
-                        className="rounded-2xl border border-slate-200 px-4 py-3"
-                      >
-                        <option value="teacher">מנהל מלמד</option>
-                        <option value="primary">מנהל ראשי</option>
-                      </select>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <button
-                          type="submit"
-                          className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
-                        >
-                          שמירת מנהל
-                        </button>
-                        <button
-                          formAction={deleteAdmin}
-                          type="submit"
-                          className="rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white"
-                        >
-                          מחיקת מנהל
-                        </button>
-                      </div>
-                    </form>
-                  )) : (
-                    <div className="rounded-3xl bg-slate-50 p-5 text-sm text-slate-500 ring-1 ring-slate-200">
-                      לא נבחר מנהל להצגה.
-                    </div>
-                  )}
-                </div>
-
-                <form action={upsertAdmin} className="grid gap-3 rounded-3xl bg-blue-50 p-4">
-                  <h3 className="text-lg font-semibold text-slate-900">הוספת מנהל חדש</h3>
-                  <input
-                    name="display_name"
-                    placeholder="שם תצוגה"
-                    className="rounded-2xl border border-slate-200 px-4 py-3"
-                  />
-                  <input
-                    name="username"
-                    placeholder="שם משתמש"
-                    className="rounded-2xl border border-slate-200 px-4 py-3"
-                  />
-                  <input
-                    name="whatsapp_phone"
-                    placeholder="מספר WhatsApp, למשל 9725..."
-                    className="rounded-2xl border border-slate-200 px-4 py-3"
-                  />
-                  <input
-                    name="city"
-                    placeholder="עיר / יישוב"
-                    className="rounded-2xl border border-slate-200 px-4 py-3"
-                  />
-                  <input
-                    name="email"
-                    type="email"
-                    placeholder="אימייל"
-                    className="rounded-2xl border border-slate-200 px-4 py-3"
-                  />
-                  <input
-                    name="password"
-                    type="password"
-                    placeholder="סיסמה"
-                    className="rounded-2xl border border-slate-200 px-4 py-3"
-                  />
-                  <select
-                    name="role"
-                    defaultValue="teacher"
-                    className="rounded-2xl border border-slate-200 px-4 py-3"
-                  >
-                    <option value="teacher">מנהל מלמד</option>
-                    <option value="primary">מנהל ראשי</option>
-                  </select>
-                  <button
-                    type="submit"
-                    className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
-                  >
-                    הוספת מנהל
-                  </button>
-                </form>
-              </div>
-            </DisclosureSection>
-          </div>
-        ) : null}
-
-        <div className="order-5 grid items-start gap-6 xl:grid-cols-[1.6fr_1fr]">
+        <div className="order-5 grid items-start gap-6">
           <div className="xl:col-span-2">
           <DisclosureSection
+            defaultOpen
             title="ספריות פרשה של מלמדים"
-            description="כאן יוצרים פרשת עבודה למלמד, קובעים נוסח, ורואים אם הפרשה פעילה או קפואה."
+            description="כאן בוחרים ספריית עבודה, רואים אילו תלמידים משויכים אליה, ומשם ממשיכים לעריכת הפרשה עצמה."
           >
-            <div className="grid gap-3 md:grid-cols-4">
+            <div id="teacher-libraries" className="grid gap-3 md:grid-cols-4">
               <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">
                 <div className="text-xs text-slate-500">פעילות</div>
                 <div className="mt-1 text-2xl font-black text-emerald-700">{teacherParashaStatusCounts.active}</div>
@@ -1004,7 +866,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               </div>
             </div>
 
-            <AdminQueryForm className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_1fr_1fr_1.4fr_auto]">
+            <AdminQueryForm
+              className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_1fr_1fr_1.4fr_auto]"
+              autoSubmitOnChange
+            >
               {activeParashaId ? <input type="hidden" name="parashaId" value={activeParashaId} /> : null}
               {activeSectionId ? <input type="hidden" name="sectionId" value={activeSectionId} /> : null}
               {activePartId ? <input type="hidden" name="partId" value={activePartId} /> : null}
@@ -1012,10 +877,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               {session.role === 'primary' ? (
                 <select
                   name="ownerAdminId"
-                  defaultValue={selectedOwnerAdminId ?? ''}
+                  defaultValue={ownerAdminSelectValue}
                   className="rounded-2xl border border-slate-200 px-4 py-3"
                 >
-                  <option value="">כל המלמדים</option>
+                  <option value="all">כל המלמדים</option>
                   {admins.map((admin) => (
                     <option key={admin.id} value={admin.id}>
                       {admin.display_name}
@@ -1139,6 +1004,18 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                             {getTeacherParashaStatusLabel(teacherParasha.status)}
                           </span>
                         </div>
+                        <div className="mt-3 text-xs text-slate-500">
+                          {(() => {
+                            const linkedStudents =
+                              studentsByTeacherParashaId.get(teacherParasha.id) ?? []
+
+                            if (linkedStudents.length === 0) {
+                              return 'אין עדיין תלמידים משויכים לספרייה הזאת.'
+                            }
+
+                            return `תלמידים משויכים: ${linkedStudents.map((student) => student.name).join(' , ')}`
+                          })()}
+                        </div>
                       </div>
                       <input
                         name="freeze_reason"
@@ -1184,8 +1061,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               )}
             </div>
 
-            <form action={upsertTeacherParasha} className="mt-6 grid gap-3 rounded-3xl bg-slate-50 p-4">
-              <h3 className="text-lg font-semibold text-slate-900">יצירת ספריית פרשה חדשה</h3>
+            <details className="mt-6 rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
+              <summary className="cursor-pointer list-none text-lg font-semibold text-slate-900">
+                יצירת ספריית פרשה חדשה
+              </summary>
+              <form action={upsertTeacherParasha} className="mt-4 grid gap-3">
               {session.role === 'primary' ? (
                 <select
                   name="owner_admin_id"
@@ -1229,15 +1109,35 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   >
                     יצירת ספריית פרשה
               </button>
-            </form>
+              </form>
+            </details>
           </DisclosureSection>
           </div>
 
         <DisclosureSection
           title="תלמידי המנהל"
-          description="כאן עורכים את התלמידים דרך סינון רגוע יותר: תלמיד אחד או הכול."
+          description="כאן בוחרים תלמיד מתוך המלמד המסונן, משייכים לו ספריית פרשה, ואפשר גם לפתוח ישר את הספרייה שלו לעריכה."
         >
-            <AdminQueryForm className="grid gap-3 rounded-3xl bg-slate-50 p-4 md:grid-cols-[12rem_1fr_auto]">
+            <AdminQueryForm
+              className="grid gap-3 rounded-3xl bg-slate-50 p-4 md:grid-cols-[12rem_14rem_1fr_auto]"
+              autoSubmitOnChange
+            >
+              {session.role === 'primary' ? (
+                <select
+                  name="ownerAdminId"
+                  defaultValue={ownerAdminSelectValue}
+                  className="rounded-2xl border border-slate-200 px-4 py-3"
+                >
+                  <option value="all">כל המלמדים</option>
+                  {admins.map((admin) => (
+                    <option key={admin.id} value={admin.id}>
+                      {admin.display_name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input type="hidden" name="ownerAdminId" value={session.id ?? ''} />
+              )}
               <select
                 name="studentView"
                 defaultValue={selectedStudentView}
@@ -1248,11 +1148,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               </select>
               <select
                 name="studentId"
-                defaultValue={selectedStudentCard?.id ?? ''}
+                defaultValue={normalizedSelectedStudentCardId ?? ''}
                 className="rounded-2xl border border-slate-200 px-4 py-3"
               >
                 <option value="">בחירת תלמיד</option>
-                {students.map((student) => (
+                {filteredStudentsForTeacher.map((student) => (
                   <option key={student.id} value={student.id}>
                     {student.name}
                   </option>
@@ -1317,12 +1217,37 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   className="rounded-2xl border border-slate-200 px-4 py-3"
                 >
                     <option value="">ללא ספריית פרשה</option>
-                      {allTeacherParashot.map((parasha) => (
+                      {teacherParashot.map((parasha) => (
                         <option key={parasha.id} value={parasha.id}>
-                          {parasha.internal_display_name}
+                          {parasha.internal_display_name} | {parasha.owner_display_name}
                         </option>
                       ))}
                     </select>
+                <div className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-700 ring-1 ring-slate-200">
+                  <div className="text-xs text-slate-500">שיוך נוכחי</div>
+                  <div className="mt-1 font-semibold text-slate-900">
+                    {student.admin_id
+                      ? admins.find((admin) => admin.id === student.admin_id)?.display_name ?? 'מנהל לא ידוע'
+                      : 'ללא מלמד'}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {student.active_teacher_parasha_id
+                      ? teacherParashaById.get(student.active_teacher_parasha_id)?.internal_display_name ?? 'ספרייה לא ידועה'
+                      : 'ללא ספריית פרשה'}
+                  </div>
+                </div>
+                {student.active_teacher_parasha_id ? (
+                  <Link
+                    href={`/admin?ownerAdminId=${student.admin_id ?? ''}&parashaId=${student.active_teacher_parasha_id}#content-editor`}
+                    className="rounded-2xl bg-blue-50 px-4 py-3 text-center text-sm font-semibold text-blue-800 ring-1 ring-blue-200"
+                  >
+                    פתיחת ספריית התלמיד לעריכה
+                  </Link>
+                ) : (
+                  <div className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">
+                    עדיין לא שויכה לתלמיד ספריית פרשה.
+                  </div>
+                )}
 
                 <div className="grid gap-3 sm:grid-cols-2">
                       <button
@@ -1347,8 +1272,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 )}
               </div>
 
-            <form action={upsertStudent} className="mt-6 grid gap-3 rounded-3xl bg-slate-50 p-4">
-              <h3 className="text-lg font-semibold text-slate-900">הוספת תלמיד</h3>
+            <details className="mt-6 rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
+              <summary className="cursor-pointer list-none text-lg font-semibold text-slate-900">
+                הוספת תלמיד חדש
+              </summary>
+              <form action={upsertStudent} className="mt-4 grid gap-3">
             <input
               name="name"
               placeholder="שם תלמיד"
@@ -1394,81 +1322,120 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               className="rounded-2xl border border-slate-200 px-4 py-3"
             >
                 <option value="">בחירת ספריית פרשה</option>
-                {allTeacherParashot.map((parasha) => (
-                  <option key={parasha.id} value={parasha.id}>
-                    {parasha.internal_display_name}
-                    </option>
-                  ))}
-                </select>
-            <button
-                  type="submit"
-                  className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
-                >
+                      {teacherParashot.map((parasha) => (
+                        <option key={parasha.id} value={parasha.id}>
+                          {parasha.internal_display_name} | {parasha.owner_display_name}
+                        </option>
+                      ))}
+                    </select>
+              <button
+                type="submit"
+                className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
+              >
                 הוספת תלמיד
               </button>
-            </form>
-          </DisclosureSection>
-        </div>
-
-        <div className="order-[9] grid items-start gap-6 xl:grid-cols-[1fr_1fr]">
-          <DisclosureSection
-            title="פרשות"
-            description="כאן מוסיפים פרשה חדשה בלבד. אם השם כבר קיים, המערכת תציג הודעה מתאימה."
-          >
-            <form action={upsertParasha} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
-              <h3 className="text-lg font-semibold text-slate-900">הוספת פרשה</h3>
-              <input
-                name="name"
-                placeholder="למשל: וירא"
-                className="rounded-2xl border border-slate-200 px-4 py-3"
-              />
-              <button
-                type="submit"
-                className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
-              >
-                הוספת פרשה חדשה
-              </button>
-            </form>
-          </DisclosureSection>
-
-          <DisclosureSection
-            title="חלקים ראשיים"
-            description="כאן מוסיפים חלק ראשי חדש בלבד. אם השם כבר קיים, המערכת תציג הודעה מתאימה."
-          >
-            <form action={upsertSection} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
-              <h3 className="text-lg font-semibold text-slate-900">הוספת חלק חדש</h3>
-              <input
-                name="name"
-                placeholder="למשל: מפטיר"
-                className="rounded-2xl border border-slate-200 px-4 py-3"
-              />
-              <input
-                name="order_index"
-                type="number"
-                placeholder="סדר תצוגה"
-                className="rounded-2xl border border-slate-200 px-4 py-3"
-              />
-              <button
-                type="submit"
-                className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
-              >
-                הוספת חלק
-              </button>
-            </form>
+              </form>
+            </details>
           </DisclosureSection>
         </div>
 
         <section
           id="content-editor"
-          className="order-5 rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200"
+          className="order-4 rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200"
         >
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h2 className="text-2xl font-bold text-slate-900">עריכת פרשה ספציפית</h2>
               <p className="mt-2 text-sm text-slate-600">
-                כאן מתבצעת העריכה המרכזית של המנהל: בוחרים פרשה וחלק, מוסיפים
-                תתי־חלקים, משייכים אודיו או וידאו, ומגדירים שקופיות עם זמן החלפה כשצריך.
+                כאן עובדים לפי הסדר הבא: בוחרים מלמד, אפשר להיכנס דרך תלמיד מסוים, ואז עורכים את הספרייה, החלקים ותתי־החלקים.
               </p>
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+            <div className="rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
+              <h3 className="text-lg font-semibold text-slate-900">כניסה לעריכה לפי תלמיד</h3>
+              <p className="mt-2 text-sm text-slate-600">
+                אפשר לבחור כאן מלמד, תלמיד או ספריית פרשה ישירות. הבחירה מתעדכנת מיד,
+                בלי לחצן ביניים, וכך אפשר לעבור בקלות בין עבודה לפי תלמיד לעבודה לפי פרשה.
+              </p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200">
+                  <div className="text-xs text-slate-500">מלמד פעיל</div>
+                  <div className="mt-1 text-base font-bold text-slate-900">
+                    {selectedTeacherRecord?.display_name ?? 'כל המלמדים'}
+                  </div>
+                </div>
+                <div className="rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200">
+                  <div className="text-xs text-slate-500">תלמיד נבחר</div>
+                  <div className="mt-1 text-base font-bold text-slate-900">
+                    {selectedStudentCard?.name ?? 'עדיין לא נבחר תלמיד'}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4">
+                <AdminEditorNavigator
+                  admins={admins}
+                  students={students}
+                  teacherParashot={allTeacherParashot}
+                  selectedOwnerAdminId={effectiveOwnerAdminId}
+                  selectedStudentId={normalizedSelectedStudentCardId}
+                  selectedParashaId={activeParashaId}
+                />
+              </div>
+              <div className="mt-4 rounded-2xl bg-white px-4 py-3 text-sm text-slate-700 ring-1 ring-slate-200">
+                {selectedStudentCard ? (
+                  selectedStudentTeacherParasha ? (
+                    <>
+                      <div className="font-semibold text-slate-900">
+                        {selectedStudentTeacherParasha.internal_display_name}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {selectedStudentTeacherParasha.owner_display_name} | {selectedStudentTeacherParasha.nusach_name}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-slate-500">לתלמיד שנבחר עדיין אין ספריית פרשה פעילה.</div>
+                  )
+                ) : (
+                  <div className="text-slate-500">אפשר לבחור מלמד, תלמיד או ספריית פרשה כדי להתחיל עריכה.</div>
+                )}
+              </div>
+              {selectedStudentCard && selectedStudentTeacherParasha ? (
+                <form action={hideAllStudentTeacherParashaParts} className="mt-4">
+                  <input type="hidden" name="return_path" value={currentAdminReturnPath} />
+                  <input type="hidden" name="student_id" value={selectedStudentCard.id} />
+                  <input
+                    type="hidden"
+                    name="teacher_parasha_id"
+                    value={selectedStudentTeacherParasha.id}
+                  />
+                  <button
+                    type="submit"
+                    className="w-full rounded-2xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white"
+                  >
+                    הסתרת כל תתי־החלקים של התלמיד
+                  </button>
+                </form>
+              ) : null}
+            </div>
+
+            <div className="rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
+              <h3 className="text-lg font-semibold text-slate-900">תלמידים בספרייה הפתוחה</h3>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {selectedLibraryStudents.length > 0 ? (
+                  selectedLibraryStudents.map((student) => (
+                    <span
+                      key={student.id}
+                      className="rounded-full bg-white px-3 py-2 text-xs font-semibold text-slate-700 ring-1 ring-slate-200"
+                    >
+                      {student.name}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-sm text-slate-500">אין עדיין תלמידים משויכים לספרייה הזאת.</span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1630,6 +1597,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   </form>
                   <form action={deleteTeacherParasha}>
                     <input type="hidden" name="id" value={selectedTeacherParasha.id} />
+                    <input type="hidden" name="return_path" value={currentAdminReturnPath} />
                     <button
                       type="submit"
                       className="w-full rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white"
@@ -1643,8 +1611,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           ) : null}
 
           {selectedTeacherParasha ? (
-            <div className="mt-6 grid gap-6 xl:grid-cols-2">
-              <div className="rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
+            <details className="mt-6 rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
+              <summary className="cursor-pointer list-none text-lg font-semibold text-slate-900">
+                העתקת מבנה וייבוא מספריות אחרות
+              </summary>
+              <div className="mt-4 rounded-3xl bg-slate-50 p-1">
+                <div className="rounded-3xl bg-white p-4 ring-1 ring-slate-200">
                 <h3 className="text-lg font-semibold text-slate-900">
                   העתקת מבנה לפרשה {selectedTeacherParasha.internal_display_name}
                 </h3>
@@ -1700,44 +1672,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     העתקת מבנה הפרשה
                   </button>
                 </form>
-              </div>
-
-              <div className="rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <h3 className="text-lg font-semibold text-slate-900">ספריות מקור זמינות לייבוא</h3>
                 {parashaSources.length > 0 ? (
-                  <div className="mt-4 space-y-3">
-                    {parashaSources.map((source) => (
-                      <div
-                        key={source.teacherParashaId}
-                        className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-700 ring-1 ring-slate-200"
-                      >
-                        <div className="font-semibold text-slate-900">
-                          {source.parashaName} | {source.internalDisplayName}
-                        </div>
-                        <div className="mt-1 text-xs text-slate-500">
-                          {source.displayName}{source.nusachName ? ` | ${source.nusachName}` : ''} | {source.importablePartCount} תתי־חלקים מוכנים
-                        </div>
-                        {source.immediateSourceDisplayName ? (
-                          <div className="mt-1 text-xs text-amber-700">
-                            יובא דרך: {source.displayName} | מקור ישיר קודם: {source.immediateSourceDisplayName}
-                          </div>
-                        ) : null}
-                        {source.rootSourceDisplayName &&
-                        source.rootSourceDisplayName !== source.displayName ? (
-                          <div className="mt-1 text-xs text-slate-500">
-                            מקור ראשון: {source.rootSourceDisplayName}
-                          </div>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-3 text-sm text-slate-500">
-                    עדיין אין ספריות מקור אחרות באותו נוסח עם תתי־חלקים מוכנים לייבוא.
+                  <p className="mt-3 text-xs text-slate-500">
+                    נמצאו {parashaSources.length} ספריות מקור זמינות לייבוא. הרשימה המלאה מופיעה ישירות בשדות הבחירה למעלה.
                   </p>
-                )}
+                ) : null}
               </div>
-            </div>
+              </div>
+            </details>
           ) : null}
 
           {!lessonGroup && activeParashaId && activeSectionId ? (
@@ -1768,6 +1710,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   {lessonParts.map((part) => (
                     <form key={part.id} action={upsertLessonPart} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
                       <input type="hidden" name="id" value={part.id} />
+                      <input type="hidden" name="return_path" value={currentAdminReturnPath} />
                       <input
                         type="hidden"
                         name="lesson_group_id"
@@ -2066,25 +2009,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                           loadingLabel={selectedPartMediaKind === 'video' ? 'טוען משך וידאו...' : 'טוען משך אודיו...'}
                         />
                       </div>
-                      {builderLaunchUrl ? (
-                        <div className="rounded-2xl bg-blue-50 p-4 text-sm text-blue-900 ring-1 ring-blue-200">
-                          <p className="font-semibold">יצירה מתקדמת ב-Torah Builder</p>
-                          <p className="mt-2 leading-7">
-                            פותח את אתר ה-builder עם זיהוי המלמד והקשר של הקטע הנבחר, כדי ליצור תמונת טקסט,
-                            להקליט או להעלות אודיו, ולחזור אחר כך עם וידאו מוכן.
-                          </p>
-                          <div className="mt-4">
-                            <Link
-                              href={builderLaunchUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
-                            >
-                              פתיחה ב-Torah Builder
-                            </Link>
-                          </div>
-                        </div>
-                      ) : null}
                       {selectedPartMediaKind === 'video' && selectedPart?.video_url ? (
                         <video controls className="w-full rounded-2xl" src={selectedPart.video_url} />
                       ) : selectedPart?.audio_url ? (
@@ -2253,28 +2177,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           ) : null}
         </section>
 
-        <section className="order-10 rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200">
-          <form action={updateMyShareCode} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
-            <div>
-              <h2 className="text-xl font-bold text-slate-900">קוד שיתוף למבנה פרשה</h2>
-              <p className="mt-2 text-sm text-slate-600">
-                קוד זה מאפשר למנהל אחר להעתיק אל עצמו מבנה של פרשה שלך, בלי לחבר בין הנתונים אחר כך.
-              </p>
-            </div>
-            <input
-              name="share_code"
-              type="password"
-              placeholder="קוד שיתוף חדש או מעודכן"
-              className="rounded-2xl border border-slate-200 px-4 py-3"
-            />
-            <button
-              type="submit"
-              className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
-            >
-              שמירת קוד שיתוף
-            </button>
-          </form>
-        </section>
       </div>
     </main>
   )

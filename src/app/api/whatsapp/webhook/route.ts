@@ -101,6 +101,17 @@ type IncomingWhatsAppPayload = {
           type?: string
           text?: { body?: string }
         }>
+        statuses?: Array<{
+          id?: string
+          status?: string
+          timestamp?: string
+          recipient_id?: string
+          errors?: Array<{
+            code?: number
+            title?: string
+            message?: string
+          }>
+        }>
       }
     }>
   }>
@@ -893,13 +904,32 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const payload = (await request.json()) as IncomingWhatsAppPayload
+    const statuses =
+      payload.entry?.flatMap((entry) =>
+        entry.changes?.flatMap((change) => change.value?.statuses ?? []) ?? []
+      ) ?? []
+
     console.log('whatsapp webhook payload summary', {
       entryCount: payload.entry?.length ?? 0,
       messageCount:
         payload.entry?.flatMap((entry) =>
           entry.changes?.flatMap((change) => change.value?.messages ?? []) ?? []
         ).length ?? 0,
+      statusCount: statuses.length,
     })
+
+    for (const status of statuses) {
+      console.log('whatsapp webhook status update', {
+        messageId: status.id ?? null,
+        status: status.status ?? null,
+        timestamp: status.timestamp ?? null,
+        recipientId: status.recipient_id ?? null,
+        errorCodes: status.errors?.map((error) => error.code ?? null) ?? [],
+        errorMessages:
+          status.errors?.map((error) => error.message ?? error.title ?? null) ?? [],
+      })
+    }
+
     const messages =
       payload.entry?.flatMap((entry) =>
         entry.changes?.flatMap((change) => change.value?.messages ?? []) ?? []

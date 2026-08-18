@@ -1169,6 +1169,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 {visibleStudents.length > 0 ? visibleStudents.map((student) => (
                   <form key={student.id} action={upsertStudent} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
                     <input type="hidden" name="id" value={student.id} />
+                    <input type="hidden" name="return_path" value={currentAdminReturnPath} />
                 <input
                   name="name"
                   defaultValue={student.name}
@@ -1277,6 +1278,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 הוספת תלמיד חדש
               </summary>
               <form action={upsertStudent} className="mt-4 grid gap-3">
+            <input type="hidden" name="return_path" value={currentAdminReturnPath} />
             <input
               name="name"
               placeholder="שם תלמיד"

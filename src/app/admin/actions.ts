@@ -376,113 +376,175 @@ export async function upsertSection(formData: FormData) {
 }
 
 export async function upsertStudent(formData: FormData) {
-  const session = await requireAdminSession()
+  const returnPath = readString(formData, 'return_path') || '/admin'
 
-  const id = readNumber(formData, 'id')
-  const name = readString(formData, 'name')
-  const username = readString(formData, 'username')
-  const password = readString(formData, 'password')
-  const birthDate = readString(formData, 'birth_date')
-  const torahReadingDate = readString(formData, 'torah_reading_date')
-  const whatsappPhone = readString(formData, 'whatsapp_phone')
-  const teacherParashaId = readNumber(formData, 'teacher_parasha_id')
-  const managerId = readNumber(formData, 'manager_id')
+  try {
+    const session = await requireAdminSession()
 
-  if (!name || !username) {
-    throw new Error('יש להזין שם תלמיד ושם משתמש.')
-  }
+    const id = readNumber(formData, 'id')
+    const name = readString(formData, 'name')
+    const username = readString(formData, 'username')
+    const password = readString(formData, 'password')
+    const birthDate = readString(formData, 'birth_date')
+    const torahReadingDate = readString(formData, 'torah_reading_date')
+    const whatsappPhone = readString(formData, 'whatsapp_phone')
+    const teacherParashaId = readNumber(formData, 'teacher_parasha_id')
+    const managerId = readNumber(formData, 'manager_id')
+    const normalizedWhatsappPhone = whatsappPhone ? sanitizePhoneNumber(whatsappPhone) : ''
 
-  const { data: existingStudentByUsername, error: usernameLookupError } = await supabase
-    .from('students')
-    .select('id')
-    .eq('username', username)
-    .maybeSingle()
-
-  if (usernameLookupError) {
-    throw new Error(usernameLookupError.message)
-  }
-
-  if (existingStudentByUsername && existingStudentByUsername.id !== id) {
-    throw new Error('שם המשתמש הזה כבר קיים. בחר שם משתמש אחר לתלמיד.')
-  }
-
-  let requestedAdminId =
-    session.role === 'primary'
-      ? (managerId ?? session.id)
-      : session.id
-  let resolvedParashaId: number | null = null
-
-  if (teacherParashaId) {
-    const teacherParasha = await getManageableTeacherParasha(teacherParashaId, session)
-    requestedAdminId = teacherParasha.owner_admin_id
-    resolvedParashaId = teacherParasha.parasha_id
-  }
-
-  const validAdminId = await resolveValidAdminId(requestedAdminId)
-
-  if (requestedAdminId && !validAdminId) {
-    throw new Error(
-      'לא נמצא מנהל חוקי לשיוך התלמיד. התחבר עם מנהל שנשמר בבסיס הנתונים או בחר מנהל קיים.'
-    )
-  }
-
-  const payload: {
-    name: string
-    username: string
-    birth_date: string | null
-    torah_reading_date: string | null
-    whatsapp_phone: string | null
-    parasha_id: number | null
-    admin_id: number | null
-    password_hash?: string
-  } = {
-    name,
-    username,
-    birth_date: birthDate || null,
-    torah_reading_date: torahReadingDate || null,
-    whatsapp_phone: whatsappPhone || null,
-    parasha_id: resolvedParashaId,
-    admin_id: validAdminId,
-  }
-
-  if (password) {
-    payload.password_hash = hashAdminPassword(password)
-  }
-
-  let studentId = id
-
-  if (id) {
-    const { error } = await supabase.from('students').update(payload).eq('id', id)
-    if (error) throw new Error(error.message)
-  } else {
-    if (!payload.password_hash) {
-      throw new Error('ביצירת תלמיד חדש חייבים להזין סיסמה.')
+    if (!name || !username) {
+      throw new Error('יש להזין שם תלמיד ושם משתמש.')
     }
 
-    const { data, error } = await supabase
+    const { data: existingStudentByUsername, error: usernameLookupError } = await supabase
       .from('students')
-      .insert(payload)
       .select('id')
-      .single()
-    if (error) throw new Error(error.message)
-    studentId = data.id
-  }
+      .eq('username', username)
+      .maybeSingle()
 
-  if (studentId) {
-    await assignStudentManagerInternal({
-      studentId,
-      managerId: validAdminId,
-    })
-    await assignStudentTeacherParashaInternal({
-      studentId,
-      teacherParashaId,
-      assignedByAdminId: session.id,
-    })
-    await refreshStudentWhatsAppCatalog(studentId)
-  }
+    if (usernameLookupError) {
+      throw new Error(usernameLookupError.message)
+    }
 
-  revalidatePath('/admin')
-  revalidatePath('/student')
+    if (existingStudentByUsername && existingStudentByUsername.id !== id) {
+      throw new Error('שם המשתמש הזה כבר קיים. בחר שם משתמש אחר לתלמיד.')
+    }
+
+    const { data: studentsWithSameName, error: nameLookupError } = await supabase
+      .from('students')
+      .select('id')
+      .eq('name', name)
+      .limit(2)
+
+    if (nameLookupError) {
+      throw new Error(nameLookupError.message)
+    }
+
+    if ((studentsWithSameName ?? []).some((student) => student.id !== id)) {
+      throw new Error('כבר קיים תלמיד עם השם הזה. בחר שם אחר או עדכן את התלמיד הקיים.')
+    }
+
+    if (normalizedWhatsappPhone) {
+      const { data: studentsWithPhone, error: phoneLookupError } = await supabase
+        .from('students')
+        .select('id, whatsapp_phone')
+        .not('whatsapp_phone', 'is', null)
+
+      if (phoneLookupError) {
+        throw new Error(phoneLookupError.message)
+      }
+
+      const hasDuplicatePhone = ((studentsWithPhone ?? []) as Array<{
+        id: number
+        whatsapp_phone: string | null
+      }>).some(
+        (student) =>
+          student.id !== id &&
+          sanitizePhoneNumber(student.whatsapp_phone ?? '') === normalizedWhatsappPhone
+      )
+
+      if (hasDuplicatePhone) {
+        throw new Error('מספר ה-WhatsApp הזה כבר משויך לתלמיד אחר במערכת.')
+      }
+    }
+
+    let requestedAdminId =
+      session.role === 'primary'
+        ? (managerId ?? session.id)
+        : session.id
+    let resolvedParashaId: number | null = null
+
+    if (teacherParashaId) {
+      const teacherParasha = await getManageableTeacherParasha(teacherParashaId, session)
+      requestedAdminId = teacherParasha.owner_admin_id
+      resolvedParashaId = teacherParasha.parasha_id
+    }
+
+    const validAdminId = await resolveValidAdminId(requestedAdminId)
+
+    if (requestedAdminId && !validAdminId) {
+      throw new Error(
+        'לא נמצא מנהל חוקי לשיוך התלמיד. התחבר עם מנהל שנשמר בבסיס הנתונים או בחר מנהל קיים.'
+      )
+    }
+
+    const payload: {
+      name: string
+      username: string
+      birth_date: string | null
+      torah_reading_date: string | null
+      whatsapp_phone: string | null
+      parasha_id: number | null
+      admin_id: number | null
+      password_hash?: string
+    } = {
+      name,
+      username,
+      birth_date: birthDate || null,
+      torah_reading_date: torahReadingDate || null,
+      whatsapp_phone: normalizedWhatsappPhone || null,
+      parasha_id: resolvedParashaId,
+      admin_id: validAdminId,
+    }
+
+    if (password) {
+      payload.password_hash = hashAdminPassword(password)
+    }
+
+    let studentId = id
+
+    if (id) {
+      const { error } = await supabase.from('students').update(payload).eq('id', id)
+      if (error) throw new Error(error.message)
+    } else {
+      if (!payload.password_hash) {
+        throw new Error('ביצירת תלמיד חדש חייבים להזין סיסמה.')
+      }
+
+      const { data, error } = await supabase
+        .from('students')
+        .insert(payload)
+        .select('id')
+        .single()
+      if (error) throw new Error(error.message)
+      studentId = data.id
+    }
+
+    if (studentId) {
+      await assignStudentManagerInternal({
+        studentId,
+        managerId: validAdminId,
+      })
+      await assignStudentTeacherParashaInternal({
+        studentId,
+        teacherParashaId,
+        assignedByAdminId: session.id,
+      })
+      await refreshStudentWhatsAppCatalog(studentId)
+    }
+
+    revalidatePath('/admin')
+    revalidatePath('/student')
+    redirect(
+      buildAdminActionRedirectPath({
+        returnPath,
+        status: 'success',
+        message: id ? 'פרטי התלמיד נשמרו בהצלחה.' : 'התלמיד נוסף בהצלחה.',
+      })
+    )
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw error
+    }
+
+    redirect(
+      buildAdminActionRedirectPath({
+        returnPath,
+        status: 'error',
+        message: error instanceof Error ? error.message : 'שמירת התלמיד נכשלה.',
+      })
+    )
+  }
 }
 
 export async function sendStudentWhatsAppPracticeMessage(formData: FormData) {

@@ -70,6 +70,14 @@ export default async function LandingPage({ searchParams }: LandingPageProps) {
             <p className="mx-auto mt-4 max-w-3xl text-base leading-8 text-slate-700 sm:text-lg">
               {general.description}
             </p>
+            <div className="mt-8 flex justify-center">
+              <Link
+                href={general.primaryAction.href}
+                className="inline-flex rounded-full bg-amber-500 px-6 py-3 text-sm font-black text-slate-950 transition hover:-translate-y-0.5"
+              >
+                {general.primaryAction.label}
+              </Link>
+            </div>
             <div className="mt-8 flex flex-wrap justify-center gap-3">
               {general.quickLinks.map((link) => (
                 <Link

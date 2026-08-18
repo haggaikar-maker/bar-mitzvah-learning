@@ -10,6 +10,7 @@
 - פסקאות
 - כפתורים
 - נתיבי תמונות
+- תלמיד הדמו של אזור ה־WhatsApp
 - כרטיסי יתרונות
 - שלבי תהליך
 
@@ -22,6 +23,21 @@
 1. פותחים את `landing-page-content.ts`
 2. מאתרים את האזור הרצוי, למשל `hero`, `story`, `highlights`
 3. משנים את הטקסט בעברית ושומרים
+
+## איך משנים את תלמיד הדמו של WhatsApp
+
+באזור `whatsapp` בקובץ `landing-page-content.ts` יש עכשיו שני שדות רלוונטיים:
+
+- `demoStudentName`
+- `demoStudentId`
+
+המערכת תנסה קודם למצוא תלמיד לפי `demoStudentName`.
+אם משאירים את השם ריק, היא תשתמש ב־`demoStudentId`.
+
+המלצה:
+
+1. להגדיר `demoStudentName` עם שם תלמיד ייחודי
+2. להשאיר גם `demoStudentId` כגיבוי
 
 ## איך מחליפים תמונות
 

@@ -7,6 +7,7 @@ import {
   insertMarketingLead,
   upsertMarketingDemoSession,
 } from '@/lib/marketing-landing'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import {
   normalizePhoneWithDefaultCountryCode,
   sendWhatsAppTemplateMessage,
@@ -31,6 +32,40 @@ function buildRedirectUrl(input: {
   return `/landing?${params.toString()}#${input.sectionId}`
 }
 
+async function resolveMarketingDemoStudentId() {
+  const whatsappConfig = landingPageContent.whatsapp
+
+  if (whatsappConfig.demoStudentName) {
+    const supabaseAdmin = getSupabaseAdmin()
+    const { data, error } = await supabaseAdmin
+      .from('students')
+      .select('id, name')
+      .eq('name', whatsappConfig.demoStudentName)
+      .limit(2)
+
+    if (error) {
+      throw new Error(`טעינת תלמיד הדמו נכשלה: ${error.message}`)
+    }
+
+    if (!data || data.length === 0) {
+      throw new Error(
+        `לא נמצא תלמיד דמו בשם "${whatsappConfig.demoStudentName}" בקובץ השיווק.`
+      )
+    }
+
+    if (data.length > 1) {
+      throw new Error(
+        `נמצאו כמה תלמידים בשם "${whatsappConfig.demoStudentName}". כדאי להגדיר demoStudentId או לבחור שם ייחודי יותר.`
+      )
+    }
+
+    const matchingStudent = data[0] as { id: number; name: string }
+    return matchingStudent.id
+  }
+
+  return whatsappConfig.demoStudentId
+}
+
 export async function sendMarketingWhatsAppDemo(formData: FormData) {
   const phone = readString(formData, 'phone')
   const countryCode = readString(formData, 'countryCode')
@@ -52,9 +87,11 @@ export async function sendMarketingWhatsAppDemo(formData: FormData) {
       )
     }
 
+    const resolvedDemoStudentId = await resolveMarketingDemoStudentId()
+
     await upsertMarketingDemoSession({
       phone: normalizedPhone,
-      demoStudentId: whatsappConfig.demoStudentId,
+      demoStudentId: resolvedDemoStudentId,
       templateName: whatsappConfig.metaTemplateName || null,
       sessionHours: whatsappConfig.demoSessionHours,
     })

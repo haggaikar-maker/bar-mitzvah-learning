@@ -3,6 +3,11 @@ export type MarketingQuickLink = {
   href: string
 }
 
+export type MarketingPrimaryAction = {
+  label: string
+  href: string
+}
+
 export type MarketingDemoLink = {
   label: string
   href: string
@@ -19,6 +24,10 @@ export const landingPageContent = {
     title: 'ליווי דיגיטלי מסודר ללימוד בר מצווה',
     description:
       'סרטונים, מעקב תרגולים, קישורים ישירים ו־WhatsApp חכם במקום אחד. מתאים להורים, מלמדים ובני מצווה שרוצים תהליך ברור ונוח.',
+    primaryAction: {
+      label: 'התחברות למערכת',
+      href: '/',
+    } satisfies MarketingPrimaryAction,
     quickLinks: [
       { label: 'תלמיד', href: '#marketing-student' },
       { label: 'מלווה', href: '#marketing-guide' },
@@ -72,6 +81,7 @@ export const landingPageContent = {
     metaTemplateName: 'bar_mitzvah_demo_entry',
     metaTemplateLanguageCode: 'he',
     metaTemplateBodyParameters: [] as string[],
+    demoStudentName: 'תלמיד לדוגמא',
     demoStudentId: 11,
     demoSessionHours: 24,
     detailsCommand: '100',

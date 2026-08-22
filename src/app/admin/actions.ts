@@ -1044,7 +1044,9 @@ export async function upsertLessonPart(formData: FormData) {
     uploadedVideoUrlNikud ??
     inputVideoUrlNikud ??
     normalizePublicPath(currentVideoUrlNikud) ??
-    normalizePublicPath(currentVideoUrl) ??
+    (normalizePublicPath(currentVideoUrlTikkun)
+      ? null
+      : normalizePublicPath(currentVideoUrl)) ??
     null
   const nextVideoUrlTikkun =
     uploadedVideoUrlTikkun ??

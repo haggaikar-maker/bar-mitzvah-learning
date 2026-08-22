@@ -2,7 +2,12 @@ import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type { AdminSession } from '@/lib/admin-auth'
 import type { LessonPart, LessonSlide, Section, Student } from '@/lib/practice-data'
-import { getLessonMediaKind, type LessonMediaKind } from '@/lib/lesson-media'
+import {
+  getAvailableLessonVideoVariants,
+  getLessonMediaKind,
+  type LessonMediaKind,
+  type LessonVideoVariant,
+} from '@/lib/lesson-media'
 import { createSignedStorageUrl } from '@/lib/storage-files'
 import {
   buildPracticeReminderText,
@@ -94,9 +99,12 @@ export type StudentTrackingRow = {
   mediaKind: LessonMediaKind
   isVisibleToStudent: boolean
   baseVisibility: boolean
+  preferredVideoVariant: LessonVideoVariant
   completionTarget: number
   hasAudio: boolean
   hasVideo: boolean
+  hasNikudVideo: boolean
+  hasTikkunVideo: boolean
   slideCount: number
   practiceCount: number
   completedCount: number
@@ -194,6 +202,7 @@ export async function getAdminDashboardData(selected?: {
             birth_date,
             torah_reading_date,
             whatsapp_phone,
+            preferred_video_variant,
             parasha_id,
             parashot (
               id,
@@ -632,7 +641,7 @@ export async function getAdminDashboardData(selected?: {
         const { data: sourceParts, error: sourcePartsError } = await supabase
           .from('lesson_parts')
           .select(
-            'id, lesson_group_id, name, part_order, media_kind, audio_url, video_url, duration_seconds'
+            'id, lesson_group_id, name, part_order, media_kind, audio_url, video_url, video_url_nikud, video_url_tikkun, duration_seconds'
           )
           .in('lesson_group_id', sourceGroupIds)
           .order('part_order', { ascending: true })
@@ -668,6 +677,8 @@ export async function getAdminDashboardData(selected?: {
             media_kind?: LessonMediaKind | string | null
             audio_url: string | null
             video_url?: string | null
+            video_url_nikud?: string | null
+            video_url_tikkun?: string | null
             duration_seconds: number | null
           }>
         const sourcePartIds = sourcePartRows.map((part) => part.id)
@@ -727,7 +738,7 @@ export async function getAdminDashboardData(selected?: {
           const slideCount = slideCountByPartId.get(part.id) ?? 0
           const isImportable =
             mediaKind === 'video'
-              ? Boolean(part.video_url)
+              ? getAvailableLessonVideoVariants(part).length > 0
               : Boolean(part.audio_url) && slideCount > 0
 
           if (!isImportable) {
@@ -911,7 +922,7 @@ export async function getAdminDashboardData(selected?: {
           partIds.length
             ? supabase
                 .from('student_lesson_part_settings')
-                .select('lesson_part_id, is_visible_to_student')
+                .select('lesson_part_id, is_visible_to_student, preferred_video_variant')
                 .eq('student_id', trackingStudent.id)
                 .in('lesson_part_id', partIds)
             : Promise.resolve({ data: [], error: null }),
@@ -1001,11 +1012,24 @@ export async function getAdminDashboardData(selected?: {
         recordingByPartId.set(recording.lesson_part_id, recording)
       }
 
-      const studentVisibilityByPartId = new Map<number, boolean>(
+      const studentSettingsByPartId = new Map<
+        number,
+        {
+          is_visible_to_student: boolean
+          preferred_video_variant: LessonVideoVariant | null
+        }
+      >(
         ((partSettings ?? []) as Array<{
           lesson_part_id: number
           is_visible_to_student: boolean
-        }>).map((row) => [row.lesson_part_id, row.is_visible_to_student])
+          preferred_video_variant?: LessonVideoVariant | null
+        }>).map((row) => [
+          row.lesson_part_id,
+          {
+            is_visible_to_student: row.is_visible_to_student,
+            preferred_video_variant: row.preferred_video_variant ?? null,
+          },
+        ])
       )
 
       const rows = await Promise.all(
@@ -1014,6 +1038,12 @@ export async function getAdminDashboardData(selected?: {
           const group = groupById.get(part.lesson_group_id)
           const recording = recordingByPartId.get(part.id)
           const mediaKind = getLessonMediaKind(part)
+          const studentSetting = studentSettingsByPartId.get(part.id)
+          const preferredVideoVariant =
+            studentSetting?.preferred_video_variant ??
+            trackingStudent.preferred_video_variant ??
+            'nikud'
+          const availableVideoVariants = getAvailableLessonVideoVariants(part)
           let signedUrl: string | null = null
 
           if (recording?.storage_path) {
@@ -1035,11 +1065,14 @@ export async function getAdminDashboardData(selected?: {
             mediaKind,
             isVisibleToStudent:
               (part.is_visible_to_student ?? true) &&
-              (studentVisibilityByPartId.get(part.id) ?? true),
+              (studentSetting?.is_visible_to_student ?? true),
             baseVisibility: part.is_visible_to_student ?? true,
+            preferredVideoVariant,
             completionTarget: Math.max(part.completion_target ?? 3, 1),
             hasAudio: Boolean(part.audio_url),
-            hasVideo: Boolean(part.video_url),
+            hasVideo: availableVideoVariants.length > 0 || Boolean(part.video_url),
+            hasNikudVideo: availableVideoVariants.includes('nikud'),
+            hasTikkunVideo: availableVideoVariants.includes('tikkun'),
             slideCount: slideCountByPartId.get(part.id) ?? 0,
             practiceCount: events.length,
             completedCount: events.filter((event) => event.completed).length,

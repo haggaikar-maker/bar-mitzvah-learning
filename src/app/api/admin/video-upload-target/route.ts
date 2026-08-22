@@ -20,11 +20,15 @@ function buildVideoObjectPath(input: {
   sectionName: string
   partName: string
   partOrder: number
+  filenameSuffix?: string
   originalFilename: string
 }) {
   const extensionMatch = input.originalFilename.match(/\.[a-zA-Z0-9]+$/)
   const extension = extensionMatch ? extensionMatch[0].toLowerCase() : '.mp4'
-  const filename = `${slugifySegment(input.partName || 'part')}-video-${input.partOrder}-${Date.now()}${extension}`
+  const variantSuffix = input.filenameSuffix
+    ? `-${slugifySegment(input.filenameSuffix)}`
+    : ''
+  const filename = `${slugifySegment(input.partName || 'part')}-video${variantSuffix}-${input.partOrder}-${Date.now()}${extension}`
 
   return [
     slugifySegment(input.parashaName || 'parasha'),
@@ -40,6 +44,7 @@ type UploadTargetRequest = {
   sectionName?: string
   partName?: string
   partOrder?: number
+  filenameSuffix?: string
   originalFilename?: string
 }
 
@@ -134,6 +139,7 @@ export async function POST(request: Request) {
       sectionName: body.sectionName ?? 'section',
       partName: body.partName ?? 'part',
       partOrder,
+      filenameSuffix: body.filenameSuffix ?? '',
       originalFilename: body.originalFilename ?? 'video.mp4',
     })
     const bucketName = getBucketName('videos')

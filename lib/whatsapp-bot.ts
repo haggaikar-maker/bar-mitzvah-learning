@@ -1,6 +1,13 @@
 import 'server-only'
 
-import { getLessonMediaKind, type LessonMediaKind } from '@/lib/lesson-media'
+import {
+  getAvailableLessonVideoVariants,
+  getLessonMediaKind,
+  getLessonMediaUrl,
+  resolveLessonVideoVariant,
+  type LessonMediaKind,
+  type LessonVideoVariant,
+} from '@/lib/lesson-media'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { sanitizePhoneNumber } from '@/lib/whatsapp'
 
@@ -10,6 +17,7 @@ export type StudentWhatsAppCatalogStudent = {
   name: string
   whatsapp_phone: string | null
   torah_reading_date: string | null
+  preferred_video_variant?: LessonVideoVariant | null
 }
 
 export type StudentWhatsAppCatalogPart = {
@@ -25,6 +33,7 @@ export type StudentWhatsAppCatalogPart = {
   mediaUrl: string | null
   audioUrl: string | null
   videoUrl: string | null
+  selectedVideoVariant?: LessonVideoVariant | null
   slideCount: number
 }
 
@@ -217,7 +226,7 @@ async function buildStudentWhatsAppCatalogSnapshot(
   const supabaseAdmin = getSupabaseAdmin()
   const { data: studentRow, error: studentError } = await supabaseAdmin
     .from('students')
-    .select('id, admin_id, name, whatsapp_phone, torah_reading_date')
+    .select('id, admin_id, name, whatsapp_phone, torah_reading_date, preferred_video_variant')
     .eq('id', studentId)
     .maybeSingle()
 
@@ -310,7 +319,7 @@ async function buildStudentWhatsAppCatalogSnapshot(
   const { data: parts, error: partsError } = await supabaseAdmin
     .from('lesson_parts')
     .select(
-      'id, lesson_group_id, name, part_order, is_visible_to_student, completion_target, audio_url, video_url, media_kind'
+      'id, lesson_group_id, name, part_order, is_visible_to_student, completion_target, audio_url, video_url, video_url_nikud, video_url_tikkun, media_kind'
     )
     .in('lesson_group_id', groupIds)
 
@@ -327,6 +336,8 @@ async function buildStudentWhatsAppCatalogSnapshot(
     completion_target: number | null
     audio_url: string | null
     video_url: string | null
+    video_url_nikud?: string | null
+    video_url_tikkun?: string | null
     media_kind?: string | null
   }>
 
@@ -351,7 +362,7 @@ async function buildStudentWhatsAppCatalogSnapshot(
       .in('lesson_part_id', partIds),
     supabaseAdmin
       .from('student_lesson_part_settings')
-      .select('lesson_part_id, is_visible_to_student')
+      .select('lesson_part_id, is_visible_to_student, preferred_video_variant')
       .eq('student_id', studentId)
       .in('lesson_part_id', partIds),
     supabaseAdmin
@@ -378,11 +389,24 @@ async function buildStudentWhatsAppCatalogSnapshot(
     )
   }
 
-  const visibilityByPartId = new Map<number, boolean>(
+  const partSettingsByPartId = new Map<
+    number,
+    {
+      is_visible_to_student: boolean
+      preferred_video_variant: LessonVideoVariant | null
+    }
+  >(
     ((settingRows ?? []) as Array<{
       lesson_part_id: number
       is_visible_to_student: boolean
-    }>).map((row) => [row.lesson_part_id, row.is_visible_to_student])
+      preferred_video_variant?: LessonVideoVariant | null
+    }>).map((row) => [
+      row.lesson_part_id,
+      {
+        is_visible_to_student: row.is_visible_to_student,
+        preferred_video_variant: row.preferred_video_variant ?? null,
+      },
+    ])
   )
 
   const completedCountByPartId = new Map<number, number>()
@@ -416,25 +440,44 @@ async function buildStudentWhatsAppCatalogSnapshot(
 
   const readyParts = lessonParts
     .filter((part) => {
+      const partSetting = partSettingsByPartId.get(part.id)
       const visible =
         (part.is_visible_to_student ?? true) &&
-        (visibilityByPartId.get(part.id) ?? true)
+        (partSetting?.is_visible_to_student ?? true)
 
       if (!visible) {
         return false
       }
 
       const mediaKind = getLessonMediaKind(part)
+      const selectedVariant = resolveLessonVideoVariant(part, {
+        studentPreferredVariant: student.preferred_video_variant ?? null,
+        partPreferredVariant: partSetting?.preferred_video_variant ?? null,
+      })
+      const resolvedVideoUrl = getLessonMediaUrl(part, {
+        studentPreferredVariant: student.preferred_video_variant ?? null,
+        partPreferredVariant: partSetting?.preferred_video_variant ?? null,
+      })
+
       return isReadyForWhatsApp({
         mediaKind,
         audioUrl: part.audio_url,
-        videoUrl: part.video_url,
+        videoUrl: mediaKind === 'video' ? resolvedVideoUrl : part.video_url,
         slideCount: slideCountByPartId.get(part.id) ?? 0,
       })
     })
     .map((part) => {
       const groupMeta = groupMetaById.get(part.lesson_group_id)
       const mediaKind = getLessonMediaKind(part)
+      const partSetting = partSettingsByPartId.get(part.id)
+      const selectedVariant = resolveLessonVideoVariant(part, {
+        studentPreferredVariant: student.preferred_video_variant ?? null,
+        partPreferredVariant: partSetting?.preferred_video_variant ?? null,
+      })
+      const resolvedMediaUrl = getLessonMediaUrl(part, {
+        studentPreferredVariant: student.preferred_video_variant ?? null,
+        partPreferredVariant: partSetting?.preferred_video_variant ?? null,
+      })
 
       return {
         lessonPartId: part.id,
@@ -446,9 +489,10 @@ async function buildStudentWhatsAppCatalogSnapshot(
         completionTarget: Math.max(part.completion_target ?? 3, 1),
         completedCount: completedCountByPartId.get(part.id) ?? 0,
         mediaKind,
-        mediaUrl: mediaKind === 'video' ? part.video_url : part.audio_url,
+        mediaUrl: mediaKind === 'video' ? resolvedMediaUrl : part.audio_url,
         audioUrl: part.audio_url,
-        videoUrl: part.video_url,
+        videoUrl: mediaKind === 'video' ? resolvedMediaUrl : part.video_url,
+        selectedVideoVariant: selectedVariant,
         slideCount: slideCountByPartId.get(part.id) ?? 0,
       } satisfies StudentWhatsAppCatalogPart
     })
@@ -1203,7 +1247,7 @@ export async function getStudentWhatsAppProgressSummary(
   const supabaseAdmin = getSupabaseAdmin()
   const { data: studentRow, error: studentError } = await supabaseAdmin
     .from('students')
-    .select('id, admin_id, name, whatsapp_phone, torah_reading_date')
+    .select('id, admin_id, name, whatsapp_phone, torah_reading_date, preferred_video_variant')
     .eq('id', studentId)
     .maybeSingle()
 
@@ -1293,7 +1337,7 @@ export async function getStudentWhatsAppProgressSummary(
   const { data: parts, error: partsError } = await supabaseAdmin
     .from('lesson_parts')
     .select(
-      'id, lesson_group_id, name, part_order, is_visible_to_student, completion_target, audio_url, video_url, media_kind'
+      'id, lesson_group_id, name, part_order, is_visible_to_student, completion_target, audio_url, video_url, video_url_nikud, video_url_tikkun, media_kind'
     )
     .in('lesson_group_id', groupIds)
 
@@ -1310,6 +1354,8 @@ export async function getStudentWhatsAppProgressSummary(
     completion_target: number | null
     audio_url: string | null
     video_url: string | null
+    video_url_nikud?: string | null
+    video_url_tikkun?: string | null
     media_kind?: string | null
   }>
 
@@ -1334,7 +1380,7 @@ export async function getStudentWhatsAppProgressSummary(
       .in('lesson_part_id', partIds),
     supabaseAdmin
       .from('student_lesson_part_settings')
-      .select('lesson_part_id, is_visible_to_student')
+      .select('lesson_part_id, is_visible_to_student, preferred_video_variant')
       .eq('student_id', studentId)
       .in('lesson_part_id', partIds),
     supabaseAdmin
@@ -1367,11 +1413,24 @@ export async function getStudentWhatsAppProgressSummary(
     )
   }
 
-  const visibilityByPartId = new Map<number, boolean>(
+  const partSettingsByPartId = new Map<
+    number,
+    {
+      is_visible_to_student: boolean
+      preferred_video_variant: LessonVideoVariant | null
+    }
+  >(
     ((settingRows ?? []) as Array<{
       lesson_part_id: number
       is_visible_to_student: boolean
-    }>).map((row) => [row.lesson_part_id, row.is_visible_to_student])
+      preferred_video_variant?: LessonVideoVariant | null
+    }>).map((row) => [
+      row.lesson_part_id,
+      {
+        is_visible_to_student: row.is_visible_to_student,
+        preferred_video_variant: row.preferred_video_variant ?? null,
+      },
+    ])
   )
 
   const practiceCountByPartId = new Map<number, number>()
@@ -1410,12 +1469,17 @@ export async function getStudentWhatsAppProgressSummary(
     .map((part) => {
       const visible =
         (part.is_visible_to_student ?? true) &&
-        (visibilityByPartId.get(part.id) ?? true)
+        (partSettingsByPartId.get(part.id)?.is_visible_to_student ?? true)
       const mediaKind = getLessonMediaKind(part)
+      const resolvedVideoUrl = getLessonMediaUrl(part, {
+        studentPreferredVariant: student.preferred_video_variant ?? null,
+        partPreferredVariant:
+          partSettingsByPartId.get(part.id)?.preferred_video_variant ?? null,
+      })
       const isReady = isReadyForWhatsApp({
         mediaKind,
         audioUrl: part.audio_url,
-        videoUrl: part.video_url,
+        videoUrl: mediaKind === 'video' ? resolvedVideoUrl : part.video_url,
         slideCount: slideCountByPartId.get(part.id) ?? 0,
       })
       const meta = groupMetaById.get(part.lesson_group_id)

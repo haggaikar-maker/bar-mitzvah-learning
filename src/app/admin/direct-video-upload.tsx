@@ -9,6 +9,9 @@ type DirectVideoUploadProps = {
   sectionName: string
   partName: string
   partOrder: number
+  fieldName: string
+  label: string
+  filenameSuffix: string
   initialVideoUrl: string
 }
 
@@ -24,6 +27,9 @@ export function DirectVideoUpload({
   sectionName,
   partName,
   partOrder,
+  fieldName,
+  label,
+  filenameSuffix,
   initialVideoUrl,
 }: DirectVideoUploadProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -61,6 +67,7 @@ export function DirectVideoUpload({
           sectionName,
           partName,
           partOrder,
+          filenameSuffix,
           originalFilename: file.name,
         }),
       })
@@ -105,7 +112,7 @@ export function DirectVideoUpload({
   return (
     <>
       <label className="grid gap-2 text-sm font-medium text-slate-700">
-        <span>בחירת קובץ וידאו</span>
+        <span>{label}</span>
         <input
           ref={fileInputRef}
           type="file"
@@ -124,7 +131,7 @@ export function DirectVideoUpload({
           : 'העלאה ישירה ל-Supabase'}
       </button>
       <input
-        name="video_url"
+        name={fieldName}
         value={videoUrl}
         onChange={(event) => setVideoUrl(event.target.value)}
         placeholder="https://.../lesson-video.mp4"

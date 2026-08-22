@@ -4,6 +4,7 @@ import {
   getLessonMediaUrl,
   isLessonPartReady,
   type LessonMediaKind,
+  type LessonVideoVariant,
 } from '@/lib/lesson-media'
 import { createSignedStorageUrl } from '@/lib/storage-files'
 
@@ -44,6 +45,7 @@ export type Student = {
   birth_date?: string | null
   torah_reading_date?: string | null
   whatsapp_phone?: string | null
+  preferred_video_variant?: LessonVideoVariant | null
   parasha_id: number | null
   parashot: Parasha | Parasha[] | null
   active_teacher_parasha_id?: number | null
@@ -76,6 +78,9 @@ export type LessonPart = {
   completion_target?: number | null
   audio_url: string | null
   video_url?: string | null
+  video_url_nikud?: string | null
+  video_url_tikkun?: string | null
+  selected_video_variant?: LessonVideoVariant | null
   duration_seconds: number | null
 }
 
@@ -98,6 +103,7 @@ export type PracticeEvent = {
 type StudentLessonPartSetting = {
   lesson_part_id: number
   is_visible_to_student: boolean
+  preferred_video_variant?: LessonVideoVariant | null
 }
 
 export type StudentRecording = {
@@ -129,11 +135,45 @@ export type PartProgress = LessonPart & {
   completionTarget: number
   mediaKind: LessonMediaKind
   mediaUrl: string | null
+  selectedVideoVariant?: LessonVideoVariant | null
 }
 
 export type LessonNavigation = {
   previous: { id: number; name: string } | null
   next: { id: number; name: string } | null
+}
+
+function getNormalizedVideoVariant(
+  value: string | LessonVideoVariant | null | undefined
+): LessonVideoVariant {
+  return value === 'tikkun' ? 'tikkun' : 'nikud'
+}
+
+function getPartSetting(
+  settingsByPartId: Map<number, StudentLessonPartSetting>,
+  partId: number
+) {
+  return settingsByPartId.get(partId) ?? null
+}
+
+function getPartVisibility(
+  part: LessonPart,
+  settingsByPartId: Map<number, StudentLessonPartSetting>
+) {
+  const setting = getPartSetting(settingsByPartId, part.id)
+  return (part.is_visible_to_student ?? true) && (setting?.is_visible_to_student ?? true)
+}
+
+function getSelectedVideoVariant(
+  student: Student,
+  part: LessonPart,
+  settingsByPartId: Map<number, StudentLessonPartSetting>
+) {
+  const setting = getPartSetting(settingsByPartId, part.id)
+
+  return getNormalizedVideoVariant(
+    setting?.preferred_video_variant ?? student.preferred_video_variant ?? null
+  )
 }
 
 function getCompletionTarget(part: LessonPart | null | undefined) {
@@ -143,20 +183,20 @@ function getCompletionTarget(part: LessonPart | null | undefined) {
 async function getStudentPartVisibilityMap(studentId: number, partIds: number[]) {
   if (partIds.length === 0) {
     return {
-      visibilityByPartId: new Map<number, boolean>(),
+      visibilityByPartId: new Map<number, StudentLessonPartSetting>(),
       error: null,
     }
   }
 
   const { data, error } = await supabase
     .from('student_lesson_part_settings')
-    .select('lesson_part_id, is_visible_to_student')
+    .select('lesson_part_id, is_visible_to_student, preferred_video_variant')
     .eq('student_id', studentId)
     .in('lesson_part_id', partIds)
 
   if (error) {
     return {
-      visibilityByPartId: new Map<number, boolean>(),
+      visibilityByPartId: new Map<number, StudentLessonPartSetting>(),
       error,
     }
   }
@@ -165,7 +205,7 @@ async function getStudentPartVisibilityMap(studentId: number, partIds: number[])
     visibilityByPartId: new Map(
       ((data ?? []) as StudentLessonPartSetting[]).map((row) => [
         row.lesson_part_id,
-        row.is_visible_to_student,
+        row,
       ])
     ),
     error: null,
@@ -422,6 +462,7 @@ export async function getStudents() {
         birth_date,
         torah_reading_date,
         whatsapp_phone,
+        preferred_video_variant,
         parasha_id,
         parashot (
           id,
@@ -447,6 +488,7 @@ export async function getActiveStudent(studentId?: number | null) {
       birth_date,
       torah_reading_date,
       whatsapp_phone,
+      preferred_video_variant,
       parasha_id,
       parashot (
         id,
@@ -589,9 +631,7 @@ export async function getStudentDashboardData(studentId?: number | null) {
     isLessonPartReady(
       {
         ...part,
-        is_visible_to_student:
-          (part.is_visible_to_student ?? true) &&
-          (visibilityByPartId.get(part.id) ?? true),
+        is_visible_to_student: getPartVisibility(part, visibilityByPartId),
       },
       slideCountByPartId,
       part.id
@@ -826,9 +866,7 @@ export async function getSectionPageData(
     isLessonPartReady(
       {
         ...part,
-        is_visible_to_student:
-          (part.is_visible_to_student ?? true) &&
-          (visibilityByPartId.get(part.id) ?? true),
+        is_visible_to_student: getPartVisibility(part, visibilityByPartId),
       },
       slideCountByPartId,
       part.id
@@ -880,7 +918,10 @@ export async function getSectionPageData(
         isReady: true,
         completionTarget: getCompletionTarget(part),
         mediaKind: getLessonMediaKind(part),
-        mediaUrl: getLessonMediaUrl(part),
+        mediaUrl: getLessonMediaUrl(part, {
+          partPreferredVariant: getSelectedVideoVariant(student, part, visibilityByPartId),
+        }),
+        selectedVideoVariant: getSelectedVideoVariant(student, part, visibilityByPartId),
       }
     }),
     parashaName,
@@ -1137,9 +1178,7 @@ export async function getLessonPageData(
       isLessonPartReady(
         {
           ...part,
-          is_visible_to_student:
-            (part.is_visible_to_student ?? true) &&
-            (navigationVisibilityByPartId.get(part.id) ?? true),
+          is_visible_to_student: getPartVisibility(part, navigationVisibilityByPartId),
         },
         navigationSlidesCountByPartId,
         part.id
@@ -1181,7 +1220,14 @@ export async function getLessonPageData(
   return {
     student,
     students,
-    lessonPart: lessonPart as LessonPart,
+    lessonPart: {
+      ...(lessonPart as LessonPart),
+      selected_video_variant: getSelectedVideoVariant(
+        student,
+        lessonPart as LessonPart,
+        navigationVisibilityByPartId
+      ),
+    } as LessonPart,
     lessonGroup: lessonGroup as LessonGroup,
     section: (section ?? null) as Section | null,
     slides: (slides ?? []) as LessonSlide[],
@@ -1192,17 +1238,18 @@ export async function getLessonPageData(
     error: !isLessonPartReady(
       {
         ...(lessonPart as LessonPart),
-        is_visible_to_student:
-          ((lessonPart as LessonPart).is_visible_to_student ?? true) &&
-          (navigationVisibilityByPartId.get(lessonPart.id) ?? true),
+        is_visible_to_student: getPartVisibility(
+          lessonPart as LessonPart,
+          navigationVisibilityByPartId
+        ),
       },
       new Map([[lessonPart.id, (slides ?? []).length]]),
       lessonPart.id
     )
       ? new Error(
           getLessonMediaKind(lessonPart as LessonPart) === 'video'
-            ? 'הקטע עדיין לא מוכן לתלמיד. נדרש קובץ וידאו.'
-            : 'הקטע עדיין לא מוכן לתלמיד. נדרש אודיו ולפחות שקופית אחת.'
+            ? 'הקטע עדיין לא מוכן לתלמיד. נדרש לפחות וידאו זמין אחד.'
+            : 'הקטע עדיין לא מוכן לתלמיד. נדרש אודיו ולפחות תמונה אחת.'
         )
       : sectionError ?? slidesError ?? practiceError ?? null,
   }

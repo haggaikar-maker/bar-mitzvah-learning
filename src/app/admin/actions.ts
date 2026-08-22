@@ -13,7 +13,11 @@ import {
   hashAdminPassword,
   verifyAdminPassword,
 } from '@/lib/admin-security'
-import { getLessonMediaKind } from '@/lib/lesson-media'
+import {
+  getAvailableLessonVideoVariants,
+  getLessonMediaKind,
+  type LessonVideoVariant,
+} from '@/lib/lesson-media'
 import {
   deleteStorageObject,
   normalizePublicPath,
@@ -102,19 +106,30 @@ function readNumber(formData: FormData, key: string) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function readVideoVariant(
+  formData: FormData,
+  key: string,
+  fallback: LessonVideoVariant | null = null
+) {
+  const value = readString(formData, key)
+  return value === 'nikud' || value === 'tikkun' ? value : fallback
+}
+
 function isLessonPartImportableForCopy(
   part: {
     id: number
     media_kind?: string | null
     audio_url: string | null
     video_url?: string | null
+    video_url_nikud?: string | null
+    video_url_tikkun?: string | null
   },
   slideCountByPartId: Map<number, number>
 ) {
   const mediaKind = getLessonMediaKind(part)
 
   if (mediaKind === 'video') {
-    return Boolean(part.video_url)
+    return getAvailableLessonVideoVariants(part).length > 0
   }
 
   return Boolean(part.audio_url) && (slideCountByPartId.get(part.id) ?? 0) > 0
@@ -388,6 +403,11 @@ export async function upsertStudent(formData: FormData) {
     const birthDate = readString(formData, 'birth_date')
     const torahReadingDate = readString(formData, 'torah_reading_date')
     const whatsappPhone = readString(formData, 'whatsapp_phone')
+    const preferredVideoVariant = readVideoVariant(
+      formData,
+      'preferred_video_variant',
+      'nikud'
+    )
     const teacherParashaId = readNumber(formData, 'teacher_parasha_id')
     const managerId = readNumber(formData, 'manager_id')
     const normalizedWhatsappPhone = whatsappPhone ? sanitizePhoneNumber(whatsappPhone) : ''
@@ -474,6 +494,7 @@ export async function upsertStudent(formData: FormData) {
       birth_date: string | null
       torah_reading_date: string | null
       whatsapp_phone: string | null
+      preferred_video_variant: LessonVideoVariant
       parasha_id: number | null
       admin_id: number | null
       password_hash?: string
@@ -483,6 +504,7 @@ export async function upsertStudent(formData: FormData) {
       birth_date: birthDate || null,
       torah_reading_date: torahReadingDate || null,
       whatsapp_phone: normalizedWhatsappPhone || null,
+      preferred_video_variant: preferredVideoVariant ?? 'nikud',
       parasha_id: resolvedParashaId,
       admin_id: validAdminId,
     }
@@ -629,7 +651,7 @@ export async function sendStudentWhatsAppPracticeMessage(formData: FormData) {
     const groupIds = lessonGroups.map((group) => group.id)
     const { data: parts, error: partsError } = await supabase
       .from('lesson_parts')
-      .select('id, lesson_group_id, name, part_order, is_visible_to_student, completion_target, audio_url, video_url, media_kind')
+      .select('id, lesson_group_id, name, part_order, is_visible_to_student, completion_target, audio_url, video_url, video_url_nikud, video_url_tikkun, media_kind')
       .in('lesson_group_id', groupIds)
 
     if (partsError) {
@@ -645,6 +667,8 @@ export async function sendStudentWhatsAppPracticeMessage(formData: FormData) {
       completion_target: number | null
       audio_url: string | null
       video_url: string | null
+      video_url_nikud?: string | null
+      video_url_tikkun?: string | null
       media_kind?: string | null
     }>
 
@@ -661,7 +685,7 @@ export async function sendStudentWhatsAppPracticeMessage(formData: FormData) {
       supabase.from('lesson_slides').select('lesson_part_id').in('lesson_part_id', partIds),
       supabase
         .from('student_lesson_part_settings')
-        .select('lesson_part_id, is_visible_to_student')
+        .select('lesson_part_id, is_visible_to_student, preferred_video_variant')
         .eq('student_id', studentId)
         .in('lesson_part_id', partIds),
       supabase
@@ -719,9 +743,9 @@ export async function sendStudentWhatsAppPracticeMessage(formData: FormData) {
           return false
         }
 
-        const mediaKind = part.media_kind === 'video' || part.video_url ? 'video' : 'audio_slides'
+        const mediaKind = getLessonMediaKind(part)
         if (mediaKind === 'video') {
-          return Boolean(part.video_url)
+          return getAvailableLessonVideoVariants(part).length > 0
         }
 
         return Boolean(part.audio_url) && (slideCountByPartId.get(part.id) ?? 0) > 0
@@ -981,28 +1005,30 @@ export async function upsertLessonPart(formData: FormData) {
   const lessonGroupId = readNumber(formData, 'lesson_group_id')
   const name = readString(formData, 'name')
   const partOrder = readNumber(formData, 'part_order')
-  const audioUrl = readString(formData, 'audio_url')
   const durationSeconds = readNumber(formData, 'duration_seconds')
   const currentAudioUrl = readString(formData, 'current_audio_url')
   const currentVideoUrl = readString(formData, 'current_video_url')
+  const currentVideoUrlNikud = readString(formData, 'current_video_url_nikud')
+  const currentVideoUrlTikkun = readString(formData, 'current_video_url_tikkun')
   const currentDurationSeconds = readNumber(formData, 'current_duration_seconds')
   const isFullReading = readString(formData, 'is_full_reading') === 'on'
-  const mediaKind = readString(formData, 'media_kind') === 'video' ? 'video' : 'audio_slides'
+  const mediaKind = 'video'
   const isVisibleToStudent = readString(formData, 'is_visible_to_student') === 'on'
   const completionTarget = readNumber(formData, 'completion_target')
   const parashaName = readString(formData, 'parasha_name')
   const sectionName = readString(formData, 'section_name')
-  const uploadedAudioUrl = await saveUploadedFile(formData.get('audio_file'), {
-    kind: 'audio',
-    segments: [parashaName || 'parasha', sectionName || 'section', name || 'part'],
-    filenameBase: `${name || 'part'}-${partOrder ?? '0'}`,
-  })
-  const uploadedVideoUrl = await saveUploadedFile(formData.get('video_file'), {
+  const uploadedVideoUrlNikud = await saveUploadedFile(formData.get('video_file_nikud'), {
     kind: 'videos',
     segments: [parashaName || 'parasha', sectionName || 'section', name || 'part'],
-    filenameBase: `${name || 'part'}-video-${partOrder ?? '0'}`,
+    filenameBase: `${name || 'part'}-nikud-${partOrder ?? '0'}`,
   })
-  const inputVideoUrl = normalizePublicPath(readString(formData, 'video_url'))
+  const uploadedVideoUrlTikkun = await saveUploadedFile(formData.get('video_file_tikkun'), {
+    kind: 'videos',
+    segments: [parashaName || 'parasha', sectionName || 'section', name || 'part'],
+    filenameBase: `${name || 'part'}-tikkun-${partOrder ?? '0'}`,
+  })
+  const inputVideoUrlNikud = normalizePublicPath(readString(formData, 'video_url_nikud'))
+  const inputVideoUrlTikkun = normalizePublicPath(readString(formData, 'video_url_tikkun'))
 
   if (!lessonGroupId || !name || partOrder === null) {
     throw new Error('יש להזין שם תת-חלק, סדר ומזהה קבוצה.')
@@ -1014,17 +1040,17 @@ export async function upsertLessonPart(formData: FormData) {
     throw new Error('יעד ההשלמות חייב להיות לפחות 1.')
   }
 
-  const nextAudioUrl =
-    mediaKind === 'audio_slides'
-      ? uploadedAudioUrl ??
-        (normalizePublicPath(audioUrl) || normalizePublicPath(currentAudioUrl) || null)
-      : null
-  const fallbackVideoUrl =
-    inputVideoUrl || normalizePublicPath(currentVideoUrl) || null
-  const nextVideoUrl =
-    mediaKind === 'video'
-      ? uploadedVideoUrl ?? fallbackVideoUrl
-      : null
+  const nextVideoUrlNikud =
+    uploadedVideoUrlNikud ??
+    inputVideoUrlNikud ??
+    normalizePublicPath(currentVideoUrlNikud) ??
+    normalizePublicPath(currentVideoUrl) ??
+    null
+  const nextVideoUrlTikkun =
+    uploadedVideoUrlTikkun ??
+    inputVideoUrlTikkun ??
+    normalizePublicPath(currentVideoUrlTikkun) ??
+    null
   const payload = {
     lesson_group_id: lessonGroupId,
     name,
@@ -1033,8 +1059,10 @@ export async function upsertLessonPart(formData: FormData) {
     media_kind: mediaKind,
     is_visible_to_student: isVisibleToStudent,
     completion_target: completionTarget ?? 3,
-    audio_url: nextAudioUrl,
-    video_url: nextVideoUrl,
+    audio_url: normalizePublicPath(currentAudioUrl) || null,
+    video_url: nextVideoUrlNikud,
+    video_url_nikud: nextVideoUrlNikud,
+    video_url_tikkun: nextVideoUrlTikkun,
     duration_seconds: durationSeconds ?? currentDurationSeconds,
   }
 
@@ -1044,6 +1072,8 @@ export async function upsertLessonPart(formData: FormData) {
       if (
         error.message.includes('media_kind') ||
         error.message.includes('video_url') ||
+        error.message.includes('video_url_nikud') ||
+        error.message.includes('video_url_tikkun') ||
         error.message.includes('completion_target') ||
         error.message.includes('is_visible_to_student')
       ) {
@@ -1060,6 +1090,8 @@ export async function upsertLessonPart(formData: FormData) {
       if (
         error.message.includes('media_kind') ||
         error.message.includes('video_url') ||
+        error.message.includes('video_url_nikud') ||
+        error.message.includes('video_url_tikkun') ||
         error.message.includes('completion_target') ||
         error.message.includes('is_visible_to_student')
       ) {
@@ -1144,6 +1176,11 @@ export async function updateStudentPartVisibility(formData: FormData) {
   const studentId = readNumber(formData, 'student_id')
   const lessonPartId = readNumber(formData, 'lesson_part_id')
   const isVisibleToStudent = readString(formData, 'is_visible_to_student') === 'on'
+  const preferredVideoVariant = readVideoVariant(
+    formData,
+    'preferred_video_variant',
+    null
+  )
 
   if (!studentId || !lessonPartId) {
     throw new Error('חסרים מזהי תלמיד או תת־חלק לעדכון חשיפה.')
@@ -1170,6 +1207,7 @@ export async function updateStudentPartVisibility(formData: FormData) {
         student_id: studentId,
         lesson_part_id: lessonPartId,
         is_visible_to_student: isVisibleToStudent,
+        preferred_video_variant: preferredVideoVariant,
       },
       { onConflict: 'student_id,lesson_part_id' }
     )
@@ -1625,7 +1663,7 @@ export async function copyParashaStructure(formData: FormData) {
     const { data: sourceParts, error: sourcePartsError } = await supabase
       .from('lesson_parts')
       .select(
-        'id, lesson_group_id, name, part_order, is_full_reading, media_kind, is_visible_to_student, completion_target, audio_url, video_url, duration_seconds'
+        'id, lesson_group_id, name, part_order, is_full_reading, media_kind, is_visible_to_student, completion_target, audio_url, video_url, video_url_nikud, video_url_tikkun, duration_seconds'
       )
       .in('lesson_group_id', sourceGroupIds)
       .order('part_order', { ascending: true })
@@ -1646,6 +1684,8 @@ export async function copyParashaStructure(formData: FormData) {
         completion_target?: number | null
         audio_url: string | null
         video_url?: string | null
+        video_url_nikud?: string | null
+        video_url_tikkun?: string | null
         duration_seconds: number | null
       }>
     const sourcePartIds = sourcePartRows.map((part) => part.id)
@@ -1849,6 +1889,8 @@ export async function copyParashaStructure(formData: FormData) {
           completion_target: part.completion_target ?? 3,
           audio_url: part.audio_url,
           video_url: part.video_url ?? null,
+          video_url_nikud: part.video_url_nikud ?? part.video_url ?? null,
+          video_url_tikkun: part.video_url_tikkun ?? null,
           duration_seconds: part.duration_seconds,
         })
         .select('id')

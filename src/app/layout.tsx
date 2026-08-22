@@ -3,7 +3,7 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: 'תרגול לבר מצווה',
-  description: 'מערכת לתרגול קריאת פרשה, חלקים, שקופיות ואודיו',
+  description: 'מערכת לתרגול קריאת פרשה, חלקים, וידאו ו-WhatsApp',
 }
 
 export default function RootLayout({

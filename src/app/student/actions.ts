@@ -2,7 +2,11 @@
 
 import { revalidatePath } from 'next/cache'
 import { createPracticeEvent } from '@/lib/practice-data'
-import { isLessonPartReady } from '@/lib/lesson-media'
+import {
+  getAvailableLessonVideoVariants,
+  getLessonMediaKind,
+  isLessonPartReady,
+} from '@/lib/lesson-media'
 import { deleteStorageObject, uploadStorageFile } from '@/lib/storage-files'
 import { requireStudentSession } from '@/lib/student-auth'
 import { supabase } from '@/lib/supabase'
@@ -99,20 +103,35 @@ async function getStudentLessonPartForRecording(studentId: number, lessonPartId:
     throw new Error('הפרשה של התלמיד קפואה כרגע, ולכן אי אפשר להקליט לקטעים שלה.')
   }
 
-  const { data: slideRows, error: slidesError } = await supabase
-    .from('lesson_slides')
-    .select('lesson_part_id')
-    .eq('lesson_part_id', lessonPartId)
+  const mediaKind = getLessonMediaKind(lessonPart)
 
-  if (slidesError) {
-    throw new Error(slidesError.message)
+  if (mediaKind === 'video') {
+    if (getAvailableLessonVideoVariants(lessonPart).length === 0) {
+      throw new Error('אפשר להקליט רק לקטע שזמין כרגע לתלמיד.')
+    }
+  } else {
+    const { data: slideRows, error: slidesError } = await supabase
+      .from('lesson_slides')
+      .select('lesson_part_id')
+      .eq('lesson_part_id', lessonPartId)
+
+    if (slidesError) {
+      throw new Error(slidesError.message)
+    }
+
+    const slideCountByPartId = new Map<number, number>([
+      [lessonPartId, (slideRows ?? []).length],
+    ])
+
+    if (!isLessonPartReady(lessonPart, slideCountByPartId, lessonPartId)) {
+      throw new Error('אפשר להקליט רק לקטע שזמין כרגע לתלמיד.')
+    }
   }
 
-  const slideCountByPartId = new Map<number, number>([
-    [lessonPartId, (slideRows ?? []).length],
-  ])
-
-  if (!isLessonPartReady(lessonPart, slideCountByPartId, lessonPartId)) {
+  if (
+    mediaKind === 'video' &&
+    !isLessonPartReady(lessonPart, undefined, lessonPartId)
+  ) {
     throw new Error('אפשר להקליט רק לקטע שזמין כרגע לתלמיד.')
   }
 
@@ -125,6 +144,8 @@ async function getStudentLessonPartForRecording(studentId: number, lessonPartId:
       media_kind?: string | null
       audio_url: string | null
       video_url?: string | null
+      video_url_nikud?: string | null
+      video_url_tikkun?: string | null
     },
   }
 }

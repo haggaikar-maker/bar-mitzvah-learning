@@ -15,11 +15,20 @@ import {
   saveStudentRecording,
 } from '../../actions'
 import type { LessonSlide, PracticeEvent, StudentRecording } from '@/lib/practice-data'
-import type { LessonMediaKind } from '@/lib/lesson-media'
+import {
+  getLessonVideoVariantLabel,
+  type LessonMediaKind,
+  type LessonVideoVariant,
+} from '@/lib/lesson-media'
 
 type LessonExperienceProps = {
   mediaKind: LessonMediaKind
   mediaUrl: string | null
+  selectedVideoVariant: LessonVideoVariant | null
+  videoVariants: Array<{
+    variant: LessonVideoVariant
+    url: string | null
+  }>
   durationSeconds: number | null
   initialSlides: LessonSlide[]
   initialPracticeEvents: PracticeEvent[]
@@ -30,6 +39,8 @@ type LessonExperienceProps = {
 export default function LessonExperience({
   mediaKind,
   mediaUrl,
+  selectedVideoVariant,
+  videoVariants,
   durationSeconds,
   initialSlides,
   initialPracticeEvents,
@@ -76,10 +87,16 @@ export default function LessonExperience({
   const [recordingPreviewUrl, setRecordingPreviewUrl] = useState<string | null>(
     studentRecording?.signed_url ?? null
   )
+  const [activeVideoVariant, setActiveVideoVariant] = useState<LessonVideoVariant | null>(
+    selectedVideoVariant
+  )
+  const [activeMediaUrl, setActiveMediaUrl] = useState<string | null>(mediaUrl)
 
-  const activeSlideIndex =
-    initialSlides.findLastIndex((slide) => slide.start_second <= currentTime) || 0
-  const activeSlide = initialSlides[Math.max(activeSlideIndex, 0)] ?? null
+  const activeSlideMatchIndex = initialSlides.findLastIndex(
+    (slide) => slide.start_second <= currentTime
+  )
+  const activeSlideIndex = activeSlideMatchIndex >= 0 ? activeSlideMatchIndex : 0
+  const activeSlide = initialSlides[activeSlideIndex] ?? null
   const firstSlide = initialSlides[0] ?? null
   const completedCount = practiceEvents.filter((event) => event.completed).length
   const sourceDuration =
@@ -91,6 +108,28 @@ export default function LessonExperience({
   const maxRecordingSeconds = sourceDuration
     ? Math.max(1, Math.floor(sourceDuration * 2))
     : null
+  const hasVideoVariantSelector =
+    mediaKind === 'video' && videoVariants.filter((item) => Boolean(item.url)).length > 1
+
+  useEffect(() => {
+    setActiveVideoVariant(selectedVideoVariant)
+  }, [selectedVideoVariant])
+
+  useEffect(() => {
+    if (mediaKind !== 'video') {
+      setActiveMediaUrl(mediaUrl)
+      return
+    }
+
+    if (activeVideoVariant) {
+      const variantUrl =
+        videoVariants.find((item) => item.variant === activeVideoVariant)?.url ?? null
+      setActiveMediaUrl(variantUrl ?? mediaUrl)
+      return
+    }
+
+    setActiveMediaUrl(mediaUrl)
+  }, [activeVideoVariant, mediaKind, mediaUrl, videoVariants])
 
   function getMediaElement() {
     return mediaKind === 'video' ? videoRef.current : audioRef.current
@@ -139,7 +178,7 @@ export default function LessonExperience({
   useEffect(() => {
     const media = mediaKind === 'video' ? videoRef.current : audioRef.current
 
-    if (!mediaUrl || !media) {
+    if (!activeMediaUrl || !media) {
       return
     }
 
@@ -155,7 +194,7 @@ export default function LessonExperience({
     return () => {
       media.removeEventListener('loadedmetadata', handleLoadedMetadata)
     }
-  }, [mediaKind, mediaUrl])
+  }, [activeMediaUrl, mediaKind])
 
   useEffect(() => {
     return () => {
@@ -564,7 +603,52 @@ export default function LessonExperience({
             </span>
           </div>
 
-          {mediaKind === 'audio_slides' && mediaUrl ? (
+          {hasVideoVariantSelector ? (
+            <div className="mb-4 flex flex-wrap gap-2">
+              {videoVariants
+                .filter((item) => Boolean(item.url))
+                .map((item) => {
+                  const isActive = item.variant === activeVideoVariant
+
+                  return (
+                    <button
+                      key={item.variant}
+                      type="button"
+                      onClick={() => {
+                        const media = getMediaElement()
+                        const nextTime = media?.currentTime ?? 0
+                        const shouldContinue = Boolean(media && !media.paused && !media.ended)
+
+                        setActiveVideoVariant(item.variant)
+                        setCurrentTime(nextTime)
+
+                        window.setTimeout(() => {
+                          const nextMedia = videoRef.current
+                          if (!nextMedia) {
+                            return
+                          }
+
+                          nextMedia.currentTime = nextTime
+
+                          if (shouldContinue) {
+                            void nextMedia.play().catch(() => undefined)
+                          }
+                        }, 60)
+                      }}
+                      className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
+                        isActive
+                          ? 'bg-[var(--student-orange)] text-white'
+                          : 'bg-white text-slate-700 ring-1 ring-slate-200'
+                      }`}
+                    >
+                      {getLessonVideoVariantLabel(item.variant)}
+                    </button>
+                  )
+                })}
+            </div>
+          ) : null}
+
+          {mediaKind === 'audio_slides' && activeMediaUrl ? (
             <audio
               ref={audioRef}
               controls
@@ -575,10 +659,10 @@ export default function LessonExperience({
               onSeeking={handleSeeking}
               onTimeUpdate={handleTimeUpdate}
             >
-              <source src={mediaUrl} type="audio/mpeg" />
+              <source src={activeMediaUrl} type="audio/mpeg" />
               הדפדפן שלך לא תומך בנגן אודיו
             </audio>
-          ) : mediaKind === 'video' && mediaUrl ? (
+          ) : mediaKind === 'video' && activeMediaUrl ? (
             <video
               ref={videoRef}
               controls
@@ -588,7 +672,7 @@ export default function LessonExperience({
               onPlay={handleAudioPlay}
               onSeeking={handleSeeking}
               onTimeUpdate={handleTimeUpdate}
-              src={mediaUrl}
+              src={activeMediaUrl}
             />
           ) : (
             <p className="text-sm text-slate-500">עדיין לא הוגדר קובץ מדיה.</p>
@@ -777,7 +861,7 @@ export default function LessonExperience({
         <div className="fixed inset-0 z-[60] bg-slate-950/75 p-3 sm:p-6">
           <div className="mx-auto flex max-h-[calc(100vh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-[2rem] bg-white shadow-2xl sm:max-h-[calc(100vh-3rem)]">
             <div className="relative bg-slate-100">
-              {mediaKind === 'video' && mediaUrl ? (
+              {mediaKind === 'video' && activeMediaUrl ? (
                 <button
                   type="button"
                   onClick={() => setIsRecordingVisualOpen(true)}
@@ -785,7 +869,7 @@ export default function LessonExperience({
                   style={{ height: '280px' }}
                 >
                   <video
-                    src={mediaUrl}
+                    src={activeMediaUrl}
                     playsInline
                     preload="metadata"
                     muted
@@ -983,9 +1067,9 @@ export default function LessonExperience({
         <div className="fixed inset-0 z-[70] bg-slate-950/92 p-3 sm:p-5">
           <div className="mx-auto flex h-full w-full max-w-5xl flex-col">
             <div className="relative flex-1 overflow-hidden rounded-[2rem] bg-black">
-              {mediaKind === 'video' && mediaUrl ? (
+              {mediaKind === 'video' && activeMediaUrl ? (
                 <video
-                  src={mediaUrl}
+                  src={activeMediaUrl}
                   playsInline
                   preload="metadata"
                   muted

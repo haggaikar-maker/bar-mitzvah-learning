@@ -2,7 +2,13 @@ import { redirect } from 'next/navigation'
 import {
   getLessonPageData,
 } from '@/lib/practice-data'
-import { getLessonMediaKind, getLessonMediaUrl } from '@/lib/lesson-media'
+import {
+  getAvailableLessonVideoVariants,
+  getLessonMediaKind,
+  getLessonMediaUrl,
+  getLessonVariantVideoUrl,
+  type LessonVideoVariant,
+} from '@/lib/lesson-media'
 import { requireStudentSession } from '@/lib/student-auth'
 import { logoutUser } from '../../../auth-actions'
 import LessonExperience from './lesson-experience'
@@ -98,7 +104,24 @@ export default async function LessonPage({
   }
 
   const mediaKind = getLessonMediaKind(lessonPart)
-  const mediaUrl = getLessonMediaUrl(lessonPart)
+  const availableVideoVariants =
+    mediaKind === 'video' ? getAvailableLessonVideoVariants(lessonPart) : []
+  const selectedVideoVariant =
+    mediaKind === 'video'
+      ? ((lessonPart.selected_video_variant ?? availableVideoVariants[0] ?? null) as
+          | LessonVideoVariant
+          | null)
+      : null
+  const mediaUrl = getLessonMediaUrl(lessonPart, {
+    partPreferredVariant: lessonPart.selected_video_variant ?? null,
+  })
+  const videoVariants =
+    mediaKind === 'video'
+      ? availableVideoVariants.map((variant) => ({
+          variant,
+          url: getLessonVariantVideoUrl(lessonPart, variant),
+        }))
+      : []
 
   return (
     <main className="student-app">
@@ -181,6 +204,8 @@ export default async function LessonPage({
             <LessonExperience
               mediaKind={mediaKind}
               mediaUrl={mediaUrl}
+              selectedVideoVariant={selectedVideoVariant}
+              videoVariants={videoVariants}
               durationSeconds={lessonPart.duration_seconds}
               initialPracticeEvents={practiceEvents}
               initialSlides={slides}

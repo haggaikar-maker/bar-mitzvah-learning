@@ -418,7 +418,11 @@ def process_job(site_url: str, secret: str, job: dict[str, Any], text2video_path
         line_spacing=32,
         margin=55,
     )
-    semantic_layout = build_tikkun_word_layout(passage, source_tokens, normalize_word, torah_builder)
+    semantic_layout = (
+        build_tikkun_word_layout(passage, source_tokens, normalize_word, torah_builder)
+        if book_name in BOOK_NAMES.values()
+        else None
+    )
     has_tikkun_layout = semantic_layout is not None
     if semantic_layout is None:
         if book_name in BOOK_NAMES.values():

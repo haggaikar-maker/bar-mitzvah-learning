@@ -7,11 +7,14 @@ import {
   getLessonMediaKind,
   getLessonMediaUrl,
   getLessonVariantVideoUrl,
+  isLessonPartReady,
   type LessonVideoVariant,
 } from '@/lib/lesson-media'
 import { requireStudentSession } from '@/lib/student-auth'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { logoutUser } from '../../../auth-actions'
 import LessonExperience from './lesson-experience'
+import SynchronizedReading from './synchronized-reading'
 import { PendingSubmitButton } from '../../../../components/pending-submit-button'
 import { StudentNavLink } from '../../../../components/student-nav-link'
 
@@ -103,7 +106,17 @@ export default async function LessonPage({
     )
   }
 
+  // This per-student table is introduced by the text-sync migration.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: synchronizedReading } = await (getSupabaseAdmin() as any)
+    .from('student_lesson_part_readings')
+    .select('audio_url, source_ref, source_text, word_timings')
+    .eq('student_id', session.id)
+    .eq('lesson_part_id', lessonPart.id)
+    .maybeSingle()
+
   const mediaKind = getLessonMediaKind(lessonPart)
+  const hasNativeMedia = isLessonPartReady(lessonPart, new Map([[lessonPart.id, slides.length]]), lessonPart.id)
   const availableVideoVariants =
     mediaKind === 'video' ? getAvailableLessonVideoVariants(lessonPart) : []
   const selectedVideoVariant =
@@ -199,20 +212,36 @@ export default async function LessonPage({
           </div>
         </section>
 
-        <div className="mt-6 student-card p-6 shadow-sm ring-1 ring-white/50 sm:p-8">
-          <div className="mt-2 grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
-            <LessonExperience
-              mediaKind={mediaKind}
-              mediaUrl={mediaUrl}
-              selectedVideoVariant={selectedVideoVariant}
-              videoVariants={videoVariants}
-              durationSeconds={lessonPart.duration_seconds}
-              initialPracticeEvents={practiceEvents}
-              initialSlides={slides}
-              studentRecording={studentRecording}
+        <div className="mt-6 student-card p-3 shadow-sm ring-1 ring-white/50 sm:p-8">
+          {synchronizedReading ? (
+            <SynchronizedReading
+              audioUrl={synchronizedReading.audio_url}
+              existingRecordingUrl={studentRecording?.signed_url ?? null}
               lessonPartId={lessonPart.id}
+              sourceRef={synchronizedReading.source_ref}
+              tokens={synchronizedReading.word_timings}
             />
-          </div>
+          ) : null}
+          {hasNativeMedia ? (
+            <div className="mt-2 grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
+              <LessonExperience
+                mediaKind={mediaKind}
+                mediaUrl={mediaUrl}
+                selectedVideoVariant={selectedVideoVariant}
+                videoVariants={videoVariants}
+                durationSeconds={lessonPart.duration_seconds}
+                initialPracticeEvents={practiceEvents}
+                initialSlides={slides}
+                studentRecording={studentRecording}
+                lessonPartId={lessonPart.id}
+                showStudentRecording={!synchronizedReading}
+              />
+            </div>
+          ) : (
+            <p className="mt-4 rounded-2xl bg-cyan-50 p-4 text-sm font-semibold text-cyan-900 ring-1 ring-cyan-100">
+              זהו קטע קריאה מסונכרן. ההקלטה והטקסט מוצגים למעלה.
+            </p>
+          )}
 
           {errorMessage ? (
             <div className="mt-6 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-200">

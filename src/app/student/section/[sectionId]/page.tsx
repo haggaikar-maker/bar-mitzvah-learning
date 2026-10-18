@@ -113,7 +113,7 @@ export default async function SectionPartsPage({
                             <AudioDuration
                               src={part.mediaUrl}
                               kind={part.mediaKind === 'video' ? 'video' : 'audio'}
-                              fallback={part.mediaKind === 'video' ? 'ללא וידאו' : 'ללא אודיו'}
+                              fallback={part.hasSynchronizedReading ? 'הקלטת מלמד' : part.mediaKind === 'video' ? 'ללא וידאו' : 'ללא אודיו'}
                               loadingLabel={
                                 part.mediaKind === 'video' ? 'טוען משך וידאו...' : 'טוען משך אודיו...'
                               }
@@ -122,7 +122,7 @@ export default async function SectionPartsPage({
                         </div>
                         <div className="flex items-center justify-between rounded-2xl bg-white/80 px-3 py-2 text-xs text-slate-700 ring-1 ring-white/80 sm:text-sm">
                           <span>{part.practiceCount} תרגולים</span>
-                          <span>{part.mediaKind === 'video' ? 'וידאו' : 'תמונות'}</span>
+                          <span>{part.hasSynchronizedReading ? 'קריאה מסונכרנת' : part.mediaKind === 'video' ? 'וידאו' : 'תמונות'}</span>
                         </div>
                       </div>
                     </div>

@@ -7,6 +7,7 @@ import {
   type LessonVideoVariant,
 } from '@/lib/lesson-media'
 import { createSignedStorageUrl } from '@/lib/storage-files'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 type Parasha = {
   id: number
@@ -135,6 +136,7 @@ export type PartProgress = LessonPart & {
   completionTarget: number
   mediaKind: LessonMediaKind
   mediaUrl: string | null
+  hasSynchronizedReading: boolean
   selectedVideoVariant?: LessonVideoVariant | null
 }
 
@@ -245,6 +247,33 @@ async function getSlideCountByPartIds(partIds: number[]) {
     slideCountByPartId,
     error: null,
   }
+}
+
+async function getSynchronizedReadingPartIds(studentId: number, partIds: number[]) {
+  if (partIds.length === 0) return new Set<number>()
+
+  // This table was added by the text-sync migration and is not in generated DB types.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (getSupabaseAdmin() as any)
+    .from('student_lesson_part_readings')
+    .select('lesson_part_id')
+    .eq('student_id', studentId)
+    .in('lesson_part_id', partIds)
+  if (error) return new Set<number>()
+  return new Set<number>((data ?? []).map((row: { lesson_part_id: number }) => row.lesson_part_id))
+}
+
+function isPartAvailableToStudent(
+  part: LessonPart,
+  visibilityByPartId: Map<number, StudentLessonPartSetting>,
+  slideCountByPartId: Map<number, number>,
+  synchronizedReadingPartIds: Set<number>
+) {
+  const isVisible = getPartVisibility(part, visibilityByPartId)
+  return isVisible && (
+    synchronizedReadingPartIds.has(part.id) ||
+    isLessonPartReady({ ...part, is_visible_to_student: true }, slideCountByPartId, part.id)
+  )
 }
 
 async function getStudentRecording(
@@ -627,15 +656,10 @@ export async function getStudentDashboardData(studentId?: number | null) {
     }
   }
 
+  const synchronizedReadingPartIds = await getSynchronizedReadingPartIds(student.id, partIds)
+
   const readyParts = parts.filter((part) =>
-    isLessonPartReady(
-      {
-        ...part,
-        is_visible_to_student: getPartVisibility(part, visibilityByPartId),
-      },
-      slideCountByPartId,
-      part.id
-    )
+    isPartAvailableToStudent(part, visibilityByPartId, slideCountByPartId, synchronizedReadingPartIds)
   )
   const readyPartIds = readyParts.map((part) => part.id)
 
@@ -862,15 +886,10 @@ export async function getSectionPageData(
     }
   }
 
+  const synchronizedReadingPartIds = await getSynchronizedReadingPartIds(student.id, partIds)
+
   const readyParts = parts.filter((part) =>
-    isLessonPartReady(
-      {
-        ...part,
-        is_visible_to_student: getPartVisibility(part, visibilityByPartId),
-      },
-      slideCountByPartId,
-      part.id
-    )
+    isPartAvailableToStudent(part, visibilityByPartId, slideCountByPartId, synchronizedReadingPartIds)
   )
   const readyPartIds = readyParts.map((part) => part.id)
 
@@ -921,6 +940,7 @@ export async function getSectionPageData(
         mediaUrl: getLessonMediaUrl(part, {
           partPreferredVariant: getSelectedVideoVariant(student, part, visibilityByPartId),
         }),
+        hasSynchronizedReading: synchronizedReadingPartIds.has(part.id),
         selectedVideoVariant: getSelectedVideoVariant(student, part, visibilityByPartId),
       }
     }),
@@ -1166,6 +1186,8 @@ export async function getLessonPageData(
     }
   }
 
+  const synchronizedReadingPartIds = await getSynchronizedReadingPartIds(student.id, navigationPartIds)
+
   const sectionOrderByGroupId = new Map<number, number>()
 
   for (const group of groupRows) {
@@ -1174,16 +1196,12 @@ export async function getLessonPageData(
   }
 
   const orderedReadyParts = allNavigationParts
-    .filter((part) =>
-      isLessonPartReady(
-        {
-          ...part,
-          is_visible_to_student: getPartVisibility(part, navigationVisibilityByPartId),
-        },
-        navigationSlidesCountByPartId,
-        part.id
-      )
-    )
+    .filter((part) => isPartAvailableToStudent(
+      part,
+      navigationVisibilityByPartId,
+      navigationSlidesCountByPartId,
+      synchronizedReadingPartIds
+    ))
     .sort((left, right) => {
       const leftSectionOrder = sectionOrderByGroupId.get(left.lesson_group_id) ?? 0
       const rightSectionOrder = sectionOrderByGroupId.get(right.lesson_group_id) ?? 0
@@ -1235,16 +1253,11 @@ export async function getLessonPageData(
     studentRecording,
     navigation,
     parashaName,
-    error: !isLessonPartReady(
-      {
-        ...(lessonPart as LessonPart),
-        is_visible_to_student: getPartVisibility(
-          lessonPart as LessonPart,
-          navigationVisibilityByPartId
-        ),
-      },
+    error: !isPartAvailableToStudent(
+      lessonPart as LessonPart,
+      navigationVisibilityByPartId,
       new Map([[lessonPart.id, (slides ?? []).length]]),
-      lessonPart.id
+      synchronizedReadingPartIds
     )
       ? new Error(
           getLessonMediaKind(lessonPart as LessonPart) === 'video'

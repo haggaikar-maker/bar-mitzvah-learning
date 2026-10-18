@@ -5,7 +5,6 @@ import { getAdminDashboardData } from '@/lib/admin-data'
 import { getAdminSession } from '@/lib/admin-auth'
 import {
   getLessonMediaKindLabel,
-  getLessonVideoVariantLabel,
 } from '@/lib/lesson-media'
 import {
   formatGregorianDate,
@@ -197,6 +196,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   const selectedPart = lessonParts.find((part) => part.id === activePartId) ?? null
   const selectedPartMediaKind = 'video'
   const trackingRows = trackingSummary?.rows ?? []
+  const selectedPartTracking = trackingRows.find((row) => row.lessonPartId === selectedPart?.id) ?? null
   const selectedLibraryCardId = activeParashaId ?? teacherParashot[0]?.id ?? null
   const filteredStudentsForTeacher =
     effectiveOwnerAdminId
@@ -352,6 +352,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           </div>
 
           <div className="flex gap-3">
+            <Link
+              href="/admin/text-sync"
+              className="rounded-2xl bg-cyan-700 px-4 py-3 text-sm font-semibold text-white"
+            >
+              סטודיו קריאה מסונכרנת
+            </Link>
             <Link
               href="/admin/advanced"
               className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
@@ -612,6 +618,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                       <th className="px-3 py-2 font-semibold">יעד</th>
                       <th className="px-3 py-2 font-semibold">מדיה</th>
                       <th className="px-3 py-2 font-semibold">הקלטת תלמיד</th>
+                      <th className="px-3 py-2 font-semibold">הקלטת מלמד</th>
                       <th className="px-3 py-2 font-semibold">תרגולים</th>
                       <th className="px-3 py-2 font-semibold">השלמות</th>
                       <th className="px-3 py-2 font-semibold">תרגול אחרון</th>
@@ -704,6 +711,19 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                             </div>
                           ) : (
                             'אין הקלטה'
+                          )}
+                        </td>
+                        <td className="px-3 py-3">
+                          {row.teacherReading ? (
+                            <div className="grid min-w-[220px] gap-2">
+                              <strong className="text-xs text-slate-900">{row.teacherReading.sourceRef}</strong>
+                              <audio controls className="w-full" src={row.teacherReading.audioUrl} />
+                              <span className="text-xs text-slate-500">
+                                נשמר {new Date(row.teacherReading.updatedAt).toLocaleString('he-IL')}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-500">אין הקלטה מסונכרנת</span>
                           )}
                         </td>
                         <td className="px-3 py-3">{row.practiceCount}</td>
@@ -1552,6 +1572,15 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                           className="w-full rounded-3xl bg-slate-900"
                           src={selectedPart.video_url_tikkun}
                         />
+                      </div>
+                    ) : null}
+
+                    {selectedPartTracking?.teacherReading ? (
+                      <div className="grid gap-2 rounded-3xl bg-white p-4 ring-1 ring-cyan-200">
+                        <div className="text-sm font-semibold text-slate-900">
+                          הקלטת המלמד לתלמיד {trackingSummary?.student.name}: {selectedPartTracking.teacherReading.sourceRef}
+                        </div>
+                        <audio controls className="w-full" src={selectedPartTracking.teacherReading.audioUrl} />
                       </div>
                     ) : null}
                   </div>

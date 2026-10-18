@@ -1,5 +1,39 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: "Stam Ashkenaz CLM";
+  src: url("/fonts/StamAshkenazCLM.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Shlomo SemiStam";
+  src: url("/fonts/ShlomosemiStam.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+.torah-teacher-text {
+  font-family: "David", "Noto Serif Hebrew", "Ezra SIL", serif;
+  font-feature-settings: "kern", "mark", "mkmk";
+}
+
+.torah-stam {
+  font-family: "Shlomo SemiStam", "Stam Ashkenaz CLM", "Times New Roman", serif;
+  font-feature-settings: "kern", "mark", "mkmk";
+}
+
+.sync-layout-spacer {
+  display: inline-block;
+  margin-inline: 0.125rem;
+  padding-inline: 0.25rem;
+  visibility: hidden;
+  user-select: none;
+}
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -232,6 +266,11 @@ body {
   background: rgb(255 255 255 / 0.8);
   box-shadow: 0 10px 25px rgb(23 50 74 / 0.08);
 }
+
+.sync-active-yellow { background: #fde047; box-shadow: 0 0 0 3px #fde047; }
+.sync-active-inverse { color: white; background: #111827; box-shadow: 0 0 0 3px #111827; }
+.sync-active-red { color: #dc2626; }
+.sync-active-red-large { color: #dc2626; font-size: 1.3em; font-weight: 800; }
 
 @media (max-width: 640px) {
   .student-shell {

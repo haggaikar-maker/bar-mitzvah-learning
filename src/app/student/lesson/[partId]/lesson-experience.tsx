@@ -34,6 +34,7 @@ type LessonExperienceProps = {
   initialPracticeEvents: PracticeEvent[]
   studentRecording: StudentRecording | null
   lessonPartId: number
+  showStudentRecording?: boolean
 }
 
 export default function LessonExperience({
@@ -46,6 +47,7 @@ export default function LessonExperience({
   initialPracticeEvents,
   studentRecording,
   lessonPartId,
+  showStudentRecording = true,
 }: LessonExperienceProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -703,7 +705,7 @@ export default function LessonExperience({
           </button>
         ) : null}
 
-        <div className="student-card p-4">
+        {showStudentRecording ? <div className="student-card p-4">
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm font-semibold text-slate-700">הקלטה שלי</p>
             {maxRecordingSeconds ? (
@@ -777,7 +779,7 @@ export default function LessonExperience({
               {recordingStatus}
             </div>
           ) : null}
-        </div>
+        </div> : null}
 
         <div className="student-card p-4">
           <p className="text-sm font-semibold text-slate-600">סטטיסטיקה</p>
@@ -857,7 +859,7 @@ export default function LessonExperience({
         ) : null}
       </div>
 
-      {isRecordingModalOpen ? (
+      {showStudentRecording && isRecordingModalOpen ? (
         <div className="fixed inset-0 z-[60] bg-slate-950/75 p-3 sm:p-6">
           <div className="mx-auto flex max-h-[calc(100vh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-[2rem] bg-white shadow-2xl sm:max-h-[calc(100vh-3rem)]">
             <div className="relative bg-slate-100">

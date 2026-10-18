@@ -1,0 +1,4 @@
+.sync-active-yellow { background: #fde047; box-shadow: 0 0 0 3px #fde047; }
+.sync-active-inverse { color: white; background: #111827; box-shadow: 0 0 0 3px #111827; }
+.sync-active-red { color: #dc2626; }
+.sync-active-red-large { color: #dc2626; font-size: 1.3em; font-weight: 800; }

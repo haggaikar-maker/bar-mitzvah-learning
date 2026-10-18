@@ -115,6 +115,11 @@ export type StudentTrackingRow = {
     createdAt: string
     signedUrl: string | null
   } | null
+  teacherReading: {
+    audioUrl: string
+    sourceRef: string
+    updatedAt: string
+  } | null
 }
 
 export type StudentTrackingSummary = {
@@ -894,6 +899,7 @@ export async function getAdminDashboardData(selected?: {
         { data: practiceEvents, error: practiceEventsError },
         { data: studentRecordings, error: studentRecordingsError },
         { data: partSettings, error: partSettingsError },
+        { data: synchronizedReadings },
         { data: whatsappMessages, error: whatsappMessagesError },
         { data: whatsappTemplateRows, error: whatsappTemplateError },
       ] =
@@ -923,6 +929,15 @@ export async function getAdminDashboardData(selected?: {
             ? supabase
                 .from('student_lesson_part_settings')
                 .select('lesson_part_id, is_visible_to_student, preferred_video_variant')
+                .eq('student_id', trackingStudent.id)
+                .in('lesson_part_id', partIds)
+            : Promise.resolve({ data: [], error: null }),
+          partIds.length && adminClientForWhatsapp
+            ? // The synchronized-reading migration has not been added to generated DB types yet.
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (adminClientForWhatsapp as any)
+                .from('student_lesson_part_readings')
+                .select('lesson_part_id, audio_url, source_ref, updated_at')
                 .eq('student_id', trackingStudent.id)
                 .in('lesson_part_id', partIds)
             : Promise.resolve({ data: [], error: null }),
@@ -1032,6 +1047,19 @@ export async function getAdminDashboardData(selected?: {
         ])
       )
 
+      const teacherReadingByPartId = new Map<number, StudentTrackingRow['teacherReading']>(
+        ((synchronizedReadings ?? []) as Array<{
+          lesson_part_id: number
+          audio_url: string
+          source_ref: string
+          updated_at: string
+        }>).map((reading) => [reading.lesson_part_id, {
+          audioUrl: reading.audio_url,
+          sourceRef: reading.source_ref,
+          updatedAt: reading.updated_at,
+        }])
+      )
+
       const rows = await Promise.all(
         parts.map(async (part) => {
           const events = eventsByPartId.get(part.id) ?? []
@@ -1085,6 +1113,7 @@ export async function getAdminDashboardData(selected?: {
                   signedUrl,
                 }
               : null,
+            teacherReading: teacherReadingByPartId.get(part.id) ?? null,
           }
         })
       )

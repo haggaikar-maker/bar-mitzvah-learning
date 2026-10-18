@@ -104,11 +104,12 @@ async function getStudentLessonPartForRecording(studentId: number, lessonPartId:
   }
 
   const mediaKind = getLessonMediaKind(lessonPart)
+  let nativeMediaAvailable = false
 
   if (mediaKind === 'video') {
-    if (getAvailableLessonVideoVariants(lessonPart).length === 0) {
-      throw new Error('אפשר להקליט רק לקטע שזמין כרגע לתלמיד.')
-    }
+    nativeMediaAvailable =
+      getAvailableLessonVideoVariants(lessonPart).length > 0 &&
+      isLessonPartReady(lessonPart, undefined, lessonPartId)
   } else {
     const { data: slideRows, error: slidesError } = await supabase
       .from('lesson_slides')
@@ -123,16 +124,24 @@ async function getStudentLessonPartForRecording(studentId: number, lessonPartId:
       [lessonPartId, (slideRows ?? []).length],
     ])
 
-    if (!isLessonPartReady(lessonPart, slideCountByPartId, lessonPartId)) {
-      throw new Error('אפשר להקליט רק לקטע שזמין כרגע לתלמיד.')
-    }
+    nativeMediaAvailable = isLessonPartReady(lessonPart, slideCountByPartId, lessonPartId)
   }
 
-  if (
-    mediaKind === 'video' &&
-    !isLessonPartReady(lessonPart, undefined, lessonPartId)
-  ) {
-    throw new Error('אפשר להקליט רק לקטע שזמין כרגע לתלמיד.')
+  if (!nativeMediaAvailable) {
+    // Synchronized text readings are valid practice targets even without video or slides.
+    const { data: synchronizedReading, error: synchronizedReadingError } = await supabase
+      .from('student_lesson_part_readings')
+      .select('id')
+      .eq('student_id', session.id)
+      .eq('lesson_part_id', lessonPartId)
+      .maybeSingle()
+
+    if (synchronizedReadingError) {
+      throw new Error(synchronizedReadingError.message)
+    }
+    if (!synchronizedReading) {
+      throw new Error('אפשר להקליט רק לקטע שזמין כרגע לתלמיד.')
+    }
   }
 
   return {

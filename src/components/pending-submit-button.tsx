@@ -10,6 +10,7 @@ type PendingSubmitButtonProps = {
   overlaySubtitle?: string
   className?: string
   disabled?: boolean
+  confirmMessage?: string
 }
 
 export function PendingSubmitButton({
@@ -19,6 +20,7 @@ export function PendingSubmitButton({
   overlaySubtitle = 'בודק את הפרטים ומעביר אותך למסך המתאים',
   className,
   disabled = false,
+  confirmMessage,
 }: PendingSubmitButtonProps) {
   const { pending } = useFormStatus()
   const isDisabled = disabled || pending
@@ -30,6 +32,11 @@ export function PendingSubmitButton({
         disabled={isDisabled}
         className={className}
         aria-busy={pending}
+        onClick={(event) => {
+          if (confirmMessage && !window.confirm(confirmMessage)) {
+            event.preventDefault()
+          }
+        }}
       >
         {pending ? pendingLabel : label}
       </button>

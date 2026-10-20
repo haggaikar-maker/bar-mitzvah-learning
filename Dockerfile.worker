@@ -1,0 +1,22 @@
+FROM python:3.12.15-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    XDG_CACHE_HOME=/tmp/cache \
+    TEXT_SYNC_WORKER_ID=vercel-daemon
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg=7:7.1.5-0+deb13u1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY tools/text_sync_worker.py /app/tools/text_sync_worker.py
+COPY tools/text-sync-runtime/ /app/tools/text-sync-runtime/
+COPY src/data/tikkun-torah-layout.json /app/src/data/tikkun-torah-layout.json
+
+RUN test -s /app/tools/text-sync-runtime/StamAshkenazCLM.ttf \
+    && pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1+cpu \
+    && pip install -r /app/tools/text-sync-runtime/requirements.txt
+
+CMD ["python", "/app/tools/text_sync_worker.py"]

@@ -7,16 +7,9 @@ import type { AdminRecord, AdminSection, AdminTeacherParasha } from '@/lib/admin
 import type { LessonPart } from '@/lib/practice-data'
 import { CenteredLoadingState } from '../../components/centered-loading-state'
 
-type SectionContentSummary = {
-  sectionId: number
-  partCount: number
-  hasContent: boolean
-}
-
 type AdminContentSelectorProps = {
   teacherParashot: AdminTeacherParasha[]
   sections: AdminSection[]
-  sectionSummaries: SectionContentSummary[]
   lessonParts: LessonPart[]
   selectedParashaId: number | null
   selectedSectionId: number | null
@@ -35,6 +28,7 @@ type AdminEditorNavigatorStudent = {
   name: string
   admin_id: number | null
   active_teacher_parasha_id?: number | null
+  assigned_teacher_parasha_ids?: number[]
 }
 
 type AdminEditorNavigatorProps = {
@@ -142,11 +136,18 @@ export function AdminEditorNavigator({
   )
 
   const filteredTeacherParashot = useMemo(
-    () =>
-      selectedOwnerAdminId
+    () => {
+      const selectedStudent = students.find((student) => student.id === selectedStudentId)
+      if (selectedStudentId && selectedStudent) {
+        const assignedIds = selectedStudent.assigned_teacher_parasha_ids ?? []
+        return teacherParashot.filter((teacherParasha) => assignedIds.includes(teacherParasha.id))
+      }
+
+      return selectedOwnerAdminId
         ? teacherParashot.filter((teacherParasha) => teacherParasha.owner_admin_id === selectedOwnerAdminId)
-        : teacherParashot,
-    [selectedOwnerAdminId, teacherParashot]
+        : teacherParashot
+    },
+    [selectedOwnerAdminId, selectedStudentId, students, teacherParashot]
   )
 
   function replaceParams(updates: Record<string, string | null | undefined>) {
@@ -201,8 +202,8 @@ export function AdminEditorNavigator({
             replaceParams({
               ownerAdminId: selectedStudent?.admin_id ? String(selectedStudent.admin_id) : selectedOwnerAdminIdValue || 'all',
               studentId: nextStudentId || null,
-              parashaId: selectedStudent?.active_teacher_parasha_id
-                ? String(selectedStudent.active_teacher_parasha_id)
+              parashaId: selectedStudent?.assigned_teacher_parasha_ids?.length === 1
+                ? String(selectedStudent.assigned_teacher_parasha_ids[0])
                 : null,
               sectionId: null,
               partId: null,
@@ -250,7 +251,6 @@ export function AdminEditorNavigator({
 export function AdminContentSelector({
   teacherParashot,
   sections,
-  sectionSummaries,
   lessonParts,
   selectedParashaId,
   selectedSectionId,
@@ -263,11 +263,6 @@ export function AdminContentSelector({
   const parashaId = selectedParashaId?.toString() ?? ''
   const sectionId = selectedSectionId?.toString() ?? ''
   const partId = selectedPartId?.toString() ?? ''
-
-  const sectionSummaryById = useMemo(
-    () => new Map(sectionSummaries.map((summary) => [summary.sectionId, summary])),
-    [sectionSummaries]
-  )
 
   function navigate(next: {
     parashaId?: string
@@ -315,7 +310,9 @@ export function AdminContentSelector({
           }}
           className="rounded-2xl border border-slate-200 px-4 py-3"
         >
-          {teacherParashot.length === 0 ? <option value="">אין ספריות זמינות</option> : null}
+          <option value="">
+            {teacherParashot.length === 0 ? 'אין ספריות זמינות' : 'בחירת ספריית פרשה'}
+          </option>
           {teacherParashot.map((parasha) => (
             <option key={parasha.id} value={parasha.id}>
               {parasha.internal_display_name} | {parasha.owner_display_name} | {parasha.nusach_name}
@@ -331,18 +328,10 @@ export function AdminContentSelector({
           }}
           className="rounded-2xl border border-slate-200 px-4 py-3"
         >
+          <option value="">בחירת חלק</option>
           {sections.map((section) => (
             <option key={section.id} value={section.id}>
-              {(() => {
-                const summary = sectionSummaryById.get(section.id)
-                if (!summary) {
-                  return `${section.name} (0)`
-                }
-
-                return summary.hasContent
-                  ? `${section.name} *`
-                  : `${section.name} (${summary.partCount})`
-              })()}
+              {section.name}
             </option>
           ))}
         </select>

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getAdminSession } from '@/lib/admin-auth'
-import { torahAliyahRanges } from '@/src/data/torah-aliyah-ranges'
+import { torahAliyahRanges, torahMaftirRanges } from '@/src/data/torah-aliyah-ranges'
 import tikkunLayoutData from '@/src/data/tikkun-torah-layout.json'
 
 type LayoutSegment = { tokens: string[] }
@@ -252,6 +252,18 @@ export async function GET(request: Request) {
       ;({ book, chapter: startChapter, verse: startVerse } = start)
       ;({ chapter: endChapter, verse: endVerse } = end)
       title ||= `${parashaName} · עלייה ${aliyah}`
+    } else if (mode === 'maftir') {
+      const parashaName = params.get('parasha') ?? ''
+      const range = (torahMaftirRanges as Record<string, { start: string; end: string }>)[parashaName]
+      if (!range) return NextResponse.json({ error: 'לא נמצא טווח מפטיר לפרשה שנבחרה.' }, { status: 400 })
+      const start = parseRef(range.start)
+      const end = parseRef(range.end)
+      book = start.book
+      startChapter = start.chapter
+      startVerse = start.verse
+      endChapter = end.chapter
+      endVerse = end.verse
+      title ||= `${parashaName} · מפטיר`
     } else if (mode === 'manual') {
       const bookKey = params.get('book') ?? ''
       book = books[bookKey] ?? ''

@@ -50,6 +50,7 @@ export type Student = {
   parasha_id: number | null
   parashot: Parasha | Parasha[] | null
   active_teacher_parasha_id?: number | null
+  assigned_teacher_parasha_ids?: number[]
   active_teacher_parasha?: TeacherParasha | null
 }
 
@@ -82,6 +83,7 @@ export type LessonPart = {
   video_url_nikud?: string | null
   video_url_tikkun?: string | null
   selected_video_variant?: LessonVideoVariant | null
+  has_synchronized_reading?: boolean
   duration_seconds: number | null
 }
 

@@ -59,7 +59,7 @@ function buildAdminActionRedirectPath(input: {
   const url = new URL(`https://local${safeReturnPath}`)
   url.searchParams.set('waStatus', input.status)
   url.searchParams.set('waMessage', input.message)
-  return `${url.pathname}?${url.searchParams.toString()}`
+  return `${url.pathname}?${url.searchParams.toString()}${url.hash}`
 }
 
 type WhatsAppMessagesAdminClient = {
@@ -681,6 +681,7 @@ export async function sendStudentWhatsAppPracticeMessage(formData: FormData) {
       { data: slideRows, error: slidesError },
       { data: settingRows, error: settingsError },
       { data: practiceRows, error: practiceError },
+      { data: synchronizedReadingRows, error: synchronizedReadingsError },
     ] = await Promise.all([
       supabase.from('lesson_slides').select('lesson_part_id').in('lesson_part_id', partIds),
       supabase
@@ -693,10 +694,17 @@ export async function sendStudentWhatsAppPracticeMessage(formData: FormData) {
         .select('lesson_part_id, completed')
         .eq('student_id', studentId)
         .in('lesson_part_id', partIds),
+      // This table is added by the text-synchronization migration.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (getSupabaseAdmin() as any)
+        .from('student_lesson_part_readings')
+        .select('lesson_part_id')
+        .eq('student_id', studentId)
+        .in('lesson_part_id', partIds),
     ])
 
-    if (slidesError || settingsError || practiceError) {
-      throw new Error(slidesError?.message ?? settingsError?.message ?? practiceError?.message ?? 'שגיאה בטעינת נתוני WhatsApp.')
+    if (slidesError || settingsError || practiceError || synchronizedReadingsError) {
+      throw new Error(slidesError?.message ?? settingsError?.message ?? practiceError?.message ?? synchronizedReadingsError?.message ?? 'שגיאה בטעינת נתוני WhatsApp.')
     }
 
     const slideCountByPartId = new Map<number, number>()
@@ -721,6 +729,10 @@ export async function sendStudentWhatsAppPracticeMessage(formData: FormData) {
       }
     }
 
+    const synchronizedReadingPartIds = new Set(
+      ((synchronizedReadingRows ?? []) as Array<{ lesson_part_id: number }>).map((row) => row.lesson_part_id)
+    )
+
     const groupMetaById = new Map(
       lessonGroups.map((group) => {
         const section = Array.isArray(group.sections) ? group.sections[0] : group.sections
@@ -741,6 +753,10 @@ export async function sendStudentWhatsAppPracticeMessage(formData: FormData) {
           (visibilityByPartId.get(part.id) ?? true)
         if (!visible) {
           return false
+        }
+
+        if (synchronizedReadingPartIds.has(part.id)) {
+          return true
         }
 
         const mediaKind = getLessonMediaKind(part)
@@ -777,6 +793,28 @@ export async function sendStudentWhatsAppPracticeMessage(formData: FormData) {
 
     if (requestedLessonPartId && !chosenPart) {
       throw new Error('הקטע שבחרת עדיין לא פתוח לתלמיד או שחסרה לו מדיה מוכנה לשליחה.')
+    }
+
+    const inboundCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    // The webhook records student-originated messages in whatsapp_messages.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: recentInbound, error: inboundError } = await (getSupabaseAdmin() as any)
+      .from('whatsapp_messages')
+      .select('id')
+      .eq('student_id', studentId)
+      .eq('message_type', 'student_inbound')
+      .gte('created_at', inboundCutoff)
+      .limit(1)
+      .maybeSingle()
+
+    if (inboundError) {
+      throw new Error(inboundError.message)
+    }
+
+    if (!recentInbound) {
+      throw new Error(
+        'אין לתלמיד סשן WhatsApp פתוח: לא התקבלה ממנו הודעה ב־24 השעות האחרונות. לשליחת קישור מחוץ לחלון הזה צריך לשלוח תבנית WhatsApp מאושרת.'
+      )
     }
 
     const selectedPart = chosenPart ?? recommendedPart
@@ -2073,40 +2111,11 @@ export async function deleteLessonPart(formData: FormData) {
     const lessonPart = await getManageableLessonPart(id, session)
     const lessonGroup = await getManageableLessonGroup(lessonPart.lesson_group_id, session)
 
-    let successMessage = 'תת־החלק נמחק בהצלחה.'
+    const { error } = await supabase.from('lesson_parts').delete().eq('id', id)
+    if (error) throw new Error(error.message)
 
     if (lessonGroup.teacher_parasha_id) {
-      const { data: activeAssignments, error: activeAssignmentsError } = await supabase
-        .from('student_teacher_parasha_assignments')
-        .select('id')
-        .eq('teacher_parasha_id', lessonGroup.teacher_parasha_id)
-        .eq('status', 'active')
-
-      if (activeAssignmentsError) {
-        throw new Error(activeAssignmentsError.message)
-      }
-
-      if ((activeAssignments?.length ?? 0) > 0) {
-        const { error: hideError } = await supabase
-          .from('lesson_parts')
-          .update({ is_visible_to_student: false })
-          .eq('id', id)
-
-        if (hideError) {
-          throw new Error(hideError.message)
-        }
-
-        successMessage =
-          'לתת־החלק יש תלמידים פעילים משויכים, לכן הוא הוסתר לתלמידים במקום להימחק פיזית.'
-      } else {
-        const { error } = await supabase.from('lesson_parts').delete().eq('id', id)
-        if (error) throw new Error(error.message)
-      }
-
       await refreshWhatsAppCatalogForTeacherParasha(lessonGroup.teacher_parasha_id)
-    } else {
-      const { error } = await supabase.from('lesson_parts').delete().eq('id', id)
-      if (error) throw new Error(error.message)
     }
 
     revalidatePath('/admin')
@@ -2115,7 +2124,7 @@ export async function deleteLessonPart(formData: FormData) {
       buildAdminActionRedirectPath({
         returnPath,
         status: 'success',
-        message: successMessage,
+        message: 'תת־החלק נמחק בהצלחה.',
       })
     )
   } catch (error) {

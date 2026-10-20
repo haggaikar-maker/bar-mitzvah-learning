@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { measureServerPerformance } from '@/lib/server-performance'
 import type { AdminSession } from '@/lib/admin-auth'
 import type { LessonPart, LessonSlide, Section, Student } from '@/lib/practice-data'
 import {
@@ -45,6 +46,15 @@ export type AdminNusach = {
 export type AdminSection = Section
 
 export type AdminStudent = Student
+
+export type AdminLandingData = {
+  students: Array<Pick<AdminStudent, 'id' | 'admin_id' | 'name'>>
+  teacherParashot: Array<Pick<
+    AdminTeacherParasha,
+    'id' | 'owner_admin_id' | 'owner_display_name' | 'internal_display_name' | 'parasha_name' | 'nusach_name' | 'status'
+  >>
+  error: Error | null
+}
 
 export type AdminLessonGroup = {
   id: number
@@ -106,6 +116,7 @@ export type StudentTrackingRow = {
   hasNikudVideo: boolean
   hasTikkunVideo: boolean
   slideCount: number
+  listenedSeconds: number
   practiceCount: number
   completedCount: number
   lastPracticedAt: string | null
@@ -173,33 +184,106 @@ function resolveTeacherParashaChain(
   return chain
 }
 
+export async function getAdminLandingData(session: AdminSession): Promise<AdminLandingData> {
+  if (session.role === 'teacher' && !session.id) {
+    return {
+      students: [],
+      teacherParashot: [],
+      error: new Error('חשבון המלמד אינו משויך למזהה במערכת.'),
+    }
+  }
+
+  let studentsQuery = supabase
+    .from('students')
+    .select('id, admin_id, name')
+    .order('name', { ascending: true })
+  let teacherParashotQuery = supabase
+    .from('teacher_parasha_catalog_view')
+    .select('id, owner_admin_id, owner_display_name, internal_display_name, parasha_name, nusach_name, status')
+    .order('owner_display_name', { ascending: true })
+    .order('parasha_name', { ascending: true })
+
+  if (session.role === 'teacher' && session.id) {
+    studentsQuery = studentsQuery.eq('admin_id', session.id)
+    teacherParashotQuery = teacherParashotQuery.eq('owner_admin_id', session.id)
+  }
+
+  const [
+    { data: students, error: studentsError },
+    { data: teacherParashot, error: teacherParashotError },
+  ] = await Promise.all([studentsQuery, teacherParashotQuery])
+
+  return {
+    students: (students ?? []) as AdminLandingData['students'],
+    teacherParashot: (teacherParashot ?? []) as AdminLandingData['teacherParashot'],
+    error: studentsError ?? teacherParashotError ?? null,
+  }
+}
+
 export async function getAdminDashboardData(selected?: {
   parashaId?: number | null
   sectionId?: number | null
   partId?: number | null
+  studentId?: number | null
   trackingStudentId?: number | null
   ownerAdminId?: number | null
+  loadImportSources?: boolean
   teacherParashaStatus?: string | null
   baseParashaFilterId?: number | null
   nusachFilterId?: number | null
 }, session?: AdminSession) {
+  let activeAssignmentsQuery = supabase
+    .from('student_teacher_parasha_assignments')
+    .select(
+      `
+            student_id,
+            teacher_parasha_id,
+            status,
+            teacher_parashot (
+              id,
+              owner_admin_id,
+              parasha_id,
+              nusach_id,
+              status,
+              variant_number,
+              freeze_reason,
+              parashot (
+                id,
+                name
+              )
+            )
+          `
+    )
+    .eq('status', 'active')
+  if (selected?.studentId) {
+    activeAssignmentsQuery = activeAssignmentsQuery.eq('student_id', selected.studentId)
+  }
+
   const [
     { data: parashot, error: parashotError },
     { data: sections, error: sectionsError },
     { data: students, error: studentsError },
     { data: teacherParashaCatalog, error: teacherParashaError },
     { data: nusachim, error: nusachimError },
+    { data: adminsWithContact, error: adminsWithContactError },
+    { data: teacherParashaLinks, error: teacherParashaLinksError },
+    { data: assignmentRows, error: assignmentRowsError },
   ] =
     await Promise.all([
-      supabase.from('parashot').select('id, name').order('name', { ascending: true }),
-      supabase
-        .from('sections')
-        .select('id, name, order_index')
-        .order('order_index', { ascending: true }),
-      supabase
-        .from('students')
-        .select(
-          `
+      measureServerPerformance('admin.query.parashot', () =>
+        supabase.from('parashot').select('id, name').order('name', { ascending: true })
+      ),
+      measureServerPerformance('admin.query.sections', () =>
+        supabase
+          .from('sections')
+          .select('id, name, order_index')
+          .order('order_index', { ascending: true })
+      ),
+      measureServerPerformance('admin.query.students', () =>
+        supabase
+          .from('students')
+          .select(
+            `
             id,
             admin_id,
             username,
@@ -214,18 +298,35 @@ export async function getAdminDashboardData(selected?: {
               name
             )
           `
-        )
-        .order('name', { ascending: true }),
-      supabase
-        .from('teacher_parasha_catalog_view')
-        .select('*')
-        .order('owner_display_name', { ascending: true })
-        .order('parasha_name', { ascending: true })
-        .order('variant_number', { ascending: true }),
-      supabase
-        .from('nusachim')
-        .select('id, slug, name, is_active')
-        .order('name', { ascending: true }),
+          )
+          .order('name', { ascending: true })
+      ),
+      measureServerPerformance('admin.query.teacher_parasha_catalog', () =>
+        supabase
+          .from('teacher_parasha_catalog_view')
+          .select('*')
+          .order('owner_display_name', { ascending: true })
+          .order('parasha_name', { ascending: true })
+          .order('variant_number', { ascending: true })
+      ),
+      measureServerPerformance('admin.query.nusachim', () =>
+        supabase
+          .from('nusachim')
+          .select('id, slug, name, is_active')
+          .order('name', { ascending: true })
+      ),
+      measureServerPerformance('admin.query.admins_with_contact', () =>
+        supabase
+          .from('admins')
+          .select('id, username, display_name, role, whatsapp_phone, city, email, status')
+          .order('display_name', { ascending: true })
+      ),
+      selected?.loadImportSources
+        ? measureServerPerformance('admin.query.teacher_parasha_links', () =>
+            supabase.from('teacher_parashot').select('id, source_teacher_parasha_id')
+          )
+        : Promise.resolve({ data: [], error: null }),
+      measureServerPerformance('admin.query.active_assignments', () => activeAssignmentsQuery),
     ])
 
   if (parashotError || sectionsError || studentsError || teacherParashaError || nusachimError) {
@@ -255,19 +356,18 @@ export async function getAdminDashboardData(selected?: {
   const availableStudents = (students ?? []) as AdminStudent[]
   const rawTeacherParashot = (teacherParashaCatalog ?? []) as AdminTeacherParasha[]
   const availableNusachim = (nusachim ?? []) as AdminNusach[]
-  const { data: adminsWithContact, error: adminsWithContactError } = await supabase
-    .from('admins')
-    .select('id, username, display_name, role, whatsapp_phone, city, email, status')
-    .order('display_name', { ascending: true })
 
   let availableAdmins: AdminRecord[] = []
   let relationshipWarning: Error | null = null
 
   if (adminsWithContactError) {
-    const { data: adminsFallback, error: adminsFallbackError } = await supabase
-      .from('admins')
-      .select('id, username, display_name, role, status')
-      .order('display_name', { ascending: true })
+    const { data: adminsFallback, error: adminsFallbackError } = await measureServerPerformance(
+      'admin.query.admins_fallback',
+      () => supabase
+        .from('admins')
+        .select('id, username, display_name, role, status')
+        .order('display_name', { ascending: true })
+    )
 
     if (adminsFallbackError) {
       relationshipWarning = new Error(
@@ -297,11 +397,7 @@ export async function getAdminDashboardData(selected?: {
       }))
   }
 
-  const { data: teacherParashaLinks, error: teacherParashaLinksError } = await supabase
-    .from('teacher_parashot')
-    .select('id, source_teacher_parasha_id')
-
-  if (teacherParashaLinksError) {
+  if (selected?.loadImportSources && teacherParashaLinksError) {
     return {
       parashot: availableParashot,
       teacherParashot: [] as AdminTeacherParasha[],
@@ -334,30 +430,6 @@ export async function getAdminDashboardData(selected?: {
     source_teacher_parasha_id: teacherParashaLinkById.get(item.id) ?? null,
   }))
 
-  const { data: assignmentRows, error: assignmentRowsError } = await supabase
-    .from('student_teacher_parasha_assignments')
-    .select(
-      `
-        student_id,
-        teacher_parasha_id,
-        status,
-        teacher_parashot (
-          id,
-          owner_admin_id,
-          parasha_id,
-          nusach_id,
-          status,
-          variant_number,
-          freeze_reason,
-          parashot (
-            id,
-            name
-          )
-        )
-      `
-    )
-    .eq('status', 'active')
-
   if (assignmentRowsError) {
     return {
       parashot: availableParashot,
@@ -386,6 +458,7 @@ export async function getAdminDashboardData(selected?: {
       teacherParashaId: number
       ownerAdminId: number | null
       parashaId: number | null
+      teacherParashaIds: number[]
     }
   >()
 
@@ -409,11 +482,17 @@ export async function getAdminDashboardData(selected?: {
       ? row.teacher_parashot[0]
       : row.teacher_parashot
 
-    assignmentByStudentId.set(row.student_id, {
+    const currentAssignments = assignmentByStudentId.get(row.student_id) ?? {
       teacherParashaId: row.teacher_parasha_id,
       ownerAdminId: teacherParasha?.owner_admin_id ?? null,
       parashaId: teacherParasha?.parasha_id ?? null,
-    })
+      teacherParashaIds: [],
+    }
+    currentAssignments.teacherParashaId = row.teacher_parasha_id
+    currentAssignments.ownerAdminId = teacherParasha?.owner_admin_id ?? currentAssignments.ownerAdminId
+    currentAssignments.parashaId = teacherParasha?.parasha_id ?? currentAssignments.parashaId
+    currentAssignments.teacherParashaIds.push(row.teacher_parasha_id)
+    assignmentByStudentId.set(row.student_id, currentAssignments)
   }
 
   const hydratedStudents = availableStudents.map((student) => {
@@ -421,6 +500,7 @@ export async function getAdminDashboardData(selected?: {
     return {
       ...student,
       active_teacher_parasha_id: assignment?.teacherParashaId ?? null,
+      assigned_teacher_parasha_ids: assignment?.teacherParashaIds ?? [],
       admin_id: assignment?.ownerAdminId ?? student.admin_id ?? null,
       parasha_id: assignment?.parashaId ?? student.parasha_id ?? null,
     }
@@ -468,21 +548,35 @@ export async function getAdminDashboardData(selected?: {
     return true
   })
 
-  const selectedParashaId =
-    selected?.parashaId ?? filteredTeacherParashot[0]?.id ?? null
-  const selectedSectionId =
-    selected?.sectionId ?? availableSections[0]?.id ?? null
+  const selectedStudentAssignmentIds = selected?.studentId
+    ? assignmentByStudentId.get(selected.studentId)?.teacherParashaIds ?? []
+    : []
+  const requestedParashaId = selected?.parashaId ?? null
+  const selectedParashaId = selected?.studentId
+    ? requestedParashaId && selectedStudentAssignmentIds.includes(requestedParashaId)
+      ? requestedParashaId
+      : selectedStudentAssignmentIds.length === 1
+        ? selectedStudentAssignmentIds[0]
+        : null
+    : requestedParashaId
+  const selectedSectionId = selected?.sectionId ?? null
   const normalizedTrackingStudentId =
     selected?.trackingStudentId &&
     visibleStudents.some((student) => student.id === selected.trackingStudentId)
       ? selected.trackingStudentId
       : null
-  const selectedTrackingStudentId =
-    normalizedTrackingStudentId ?? visibleStudents[0]?.id ?? null
+  const selectedTrackingStudentId = normalizedTrackingStudentId
 
   let lessonGroup: AdminLessonGroup | null = null
   let lessonParts: LessonPart[] = []
   let lessonSlides: LessonSlide[] = []
+  let selectedPartReading: {
+    audioUrl: string
+    sourceRef: string
+    sourceText: string
+    wordCount: number
+    updatedAt: string
+  } | null = null
   let selectedPartId = selected?.partId ?? null
   let trackingSummary: StudentTrackingSummary | null = null
 
@@ -492,12 +586,15 @@ export async function getAdminDashboardData(selected?: {
     null
 
   if (selectedParashaId && selectedSectionId) {
-    const { data: groupData, error: groupError } = await supabase
-      .from('lesson_groups')
-      .select('*')
-      .eq('teacher_parasha_id', selectedParashaId)
-      .eq('section_id', selectedSectionId)
-      .maybeSingle()
+    const { data: groupData, error: groupError } = await measureServerPerformance(
+      'admin.query.selected_lesson_group',
+      () => supabase
+        .from('lesson_groups')
+        .select('*')
+        .eq('teacher_parasha_id', selectedParashaId)
+        .eq('section_id', selectedSectionId)
+        .maybeSingle()
+    )
 
     if (groupError) {
         return {
@@ -522,11 +619,15 @@ export async function getAdminDashboardData(selected?: {
     lessonGroup = (groupData ?? null) as AdminLessonGroup | null
 
     if (lessonGroup) {
-      const { data: partData, error: partsError } = await supabase
-        .from('lesson_parts')
-        .select('*')
-        .eq('lesson_group_id', lessonGroup.id)
-        .order('part_order', { ascending: true })
+      const selectedLessonGroupId = lessonGroup.id
+      const { data: partData, error: partsError } = await measureServerPerformance(
+        'admin.query.selected_lesson_parts',
+        () => supabase
+          .from('lesson_parts')
+          .select('*')
+          .eq('lesson_group_id', selectedLessonGroupId)
+          .order('part_order', { ascending: true })
+      )
 
       if (partsError) {
         return {
@@ -550,15 +651,57 @@ export async function getAdminDashboardData(selected?: {
 
       lessonParts = (partData ?? []) as LessonPart[]
       selectedPartId = selectedPartId ?? lessonParts[0]?.id ?? null
-
       if (selectedPartId) {
-        const { data: slidesData, error: slidesError } = await supabase
-          .from('lesson_slides')
-          .select('id, lesson_part_id, image_url, slide_index, start_second')
+        // This table is added by the synchronized-readings SQL migration, ahead of the generated DB types.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const readingQuery = (getSupabaseAdmin() as any)
+          .from('student_lesson_part_readings')
+          .select('audio_url, source_ref, source_text, word_timings, updated_at')
           .eq('lesson_part_id', selectedPartId)
-          .order('slide_index', { ascending: true })
+        if (selected?.studentId) {
+          readingQuery.eq('student_id', selected.studentId)
+        }
+        readingQuery.order('updated_at', { ascending: false }).limit(1)
 
-        if (slidesError) {
+        // The synchronized-reading table is student-specific; in library-wide editing show it if any student has a reading.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const synchronizedPartsQuery = (getSupabaseAdmin() as any)
+          .from('student_lesson_part_readings')
+          .select('lesson_part_id')
+          .in('lesson_part_id', lessonParts.map((part) => part.id))
+        if (selected?.studentId) {
+          synchronizedPartsQuery.eq('student_id', selected.studentId)
+        }
+
+        const [
+          { data: slidesData, error: slidesError },
+          { data: readingRows, error: readingError },
+          { data: synchronizedPartRows, error: synchronizedPartsError },
+        ] = await Promise.all([
+          measureServerPerformance('admin.query.selected_part_slides', () =>
+            supabase
+              .from('lesson_slides')
+              .select('id, lesson_part_id, image_url, slide_index, start_second')
+              .eq('lesson_part_id', selectedPartId)
+              .order('slide_index', { ascending: true })
+          ),
+          measureServerPerformance<{
+            data: Array<{
+              audio_url: string
+              source_ref: string
+              source_text: string
+              word_timings: unknown
+              updated_at: string
+            }> | null
+            error: { message: string } | null
+          }>('admin.query.selected_part_reading', () => readingQuery),
+          measureServerPerformance<{
+            data: Array<{ lesson_part_id: number }> | null
+            error: { message: string } | null
+          }>('admin.query.selected_part_reading_flags', () => synchronizedPartsQuery),
+        ])
+
+        if (slidesError || readingError || synchronizedPartsError) {
           return {
             parashot: availableParashot,
             sections: availableSections,
@@ -574,18 +717,43 @@ export async function getAdminDashboardData(selected?: {
             selectedTrackingStudentId,
             trackingSummary,
             parashaSources: [] as ParashaSource[],
-            error: slidesError ?? relationshipWarning,
+            error: slidesError ?? readingError ?? synchronizedPartsError ?? relationshipWarning,
           }
         }
 
         lessonSlides = (slidesData ?? []) as LessonSlide[]
+        const synchronizedPartIds = new Set(
+          ((synchronizedPartRows ?? []) as Array<{ lesson_part_id: number }>).map(
+            (row) => row.lesson_part_id
+          )
+        )
+        lessonParts = lessonParts.map((part) => ({
+          ...part,
+          has_synchronized_reading: synchronizedPartIds.has(part.id),
+        }))
+        const reading = (readingRows ?? [])[0] as {
+          audio_url: string
+          source_ref: string
+          source_text: string
+          word_timings: unknown
+          updated_at: string
+        } | undefined
+        selectedPartReading = reading
+          ? {
+              audioUrl: reading.audio_url,
+              sourceRef: reading.source_ref,
+              sourceText: reading.source_text,
+              wordCount: Array.isArray(reading.word_timings) ? reading.word_timings.length : 0,
+              updatedAt: reading.updated_at,
+            }
+          : null
       }
     }
   }
 
   let parashaSources: ParashaSource[] = []
 
-  if (selectedTeacherParasha) {
+  if (selectedTeacherParasha && selected?.loadImportSources) {
     const relevantSources = allTeacherParashot.filter(
       (item) =>
         item.nusach_id === selectedTeacherParasha.nusach_id &&
@@ -607,10 +775,13 @@ export async function getAdminDashboardData(selected?: {
     const relevantSourceIds = relevantSources.map((source) => source.id)
 
     if (relevantSourceIds.length > 0) {
-      const { data: sourceGroups, error: sourceGroupsError } = await supabase
-        .from('lesson_groups')
-        .select('id, teacher_parasha_id, section_id')
-        .in('teacher_parasha_id', relevantSourceIds)
+      const { data: sourceGroups, error: sourceGroupsError } = await measureServerPerformance(
+        'admin.query.import_source_groups',
+        () => supabase
+          .from('lesson_groups')
+          .select('id, teacher_parasha_id, section_id')
+          .in('teacher_parasha_id', relevantSourceIds)
+      )
 
       if (sourceGroupsError) {
         return {
@@ -643,13 +814,16 @@ export async function getAdminDashboardData(selected?: {
       const sourceGroupIds = sourceGroupRows.map((group) => group.id)
 
       if (sourceGroupIds.length > 0) {
-        const { data: sourceParts, error: sourcePartsError } = await supabase
-          .from('lesson_parts')
-          .select(
-            'id, lesson_group_id, name, part_order, media_kind, audio_url, video_url, video_url_nikud, video_url_tikkun, duration_seconds'
-          )
-          .in('lesson_group_id', sourceGroupIds)
-          .order('part_order', { ascending: true })
+        const { data: sourceParts, error: sourcePartsError } = await measureServerPerformance(
+          'admin.query.import_source_parts',
+          () => supabase
+            .from('lesson_parts')
+            .select(
+              'id, lesson_group_id, name, part_order, media_kind, audio_url, video_url, video_url_nikud, video_url_tikkun, duration_seconds'
+            )
+            .in('lesson_group_id', sourceGroupIds)
+            .order('part_order', { ascending: true })
+        )
 
         if (sourcePartsError) {
           return {
@@ -691,10 +865,13 @@ export async function getAdminDashboardData(selected?: {
         const slideCountByPartId = new Map<number, number>()
 
         if (sourcePartIds.length > 0) {
-          const { data: sourceSlides, error: sourceSlidesError } = await supabase
-            .from('lesson_slides')
-            .select('lesson_part_id')
-            .in('lesson_part_id', sourcePartIds)
+          const { data: sourceSlides, error: sourceSlidesError } = await measureServerPerformance(
+            'admin.query.import_source_slides',
+            () => supabase
+              .from('lesson_slides')
+              .select('lesson_part_id')
+              .in('lesson_part_id', sourcePartIds)
+          )
 
           if (sourceSlidesError) {
             return {
@@ -897,6 +1074,7 @@ export async function getAdminDashboardData(selected?: {
       const [
         { data: slidesData, error: slidesError },
         { data: practiceEvents, error: practiceEventsError },
+        { data: listeningSessions, error: listeningSessionsError },
         { data: studentRecordings, error: studentRecordingsError },
         { data: partSettings, error: partSettingsError },
         { data: synchronizedReadings },
@@ -917,6 +1095,15 @@ export async function getAdminDashboardData(selected?: {
                 .eq('student_id', trackingStudent.id)
                 .in('lesson_part_id', partIds)
                 .order('created_at', { ascending: false })
+            : Promise.resolve({ data: [], error: null }),
+          partIds.length && adminClientForWhatsapp
+            ? // The listening-stats migration adds this table before generated DB types are refreshed.
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (adminClientForWhatsapp as any)
+                .from('student_listening_sessions')
+                .select('lesson_part_id, listened_seconds')
+                .eq('student_id', trackingStudent.id)
+                .in('lesson_part_id', partIds)
             : Promise.resolve({ data: [], error: null }),
           partIds.length
             ? supabase
@@ -960,7 +1147,12 @@ export async function getAdminDashboardData(selected?: {
             : Promise.resolve({ data: null, error: null }),
         ])
 
-      if (slidesError || practiceEventsError || studentRecordingsError || partSettingsError || whatsappMessagesError || whatsappTemplateError) {
+      const listeningTableUnavailable = Boolean(
+        listeningSessionsError &&
+          (listeningSessionsError.code === '42P01' ||
+            listeningSessionsError.message.includes('student_listening_sessions'))
+      )
+      if (slidesError || practiceEventsError || (!listeningTableUnavailable && listeningSessionsError) || studentRecordingsError || partSettingsError || whatsappMessagesError || whatsappTemplateError) {
         return {
           parashot: availableParashot,
           sections: availableSections,
@@ -976,7 +1168,7 @@ export async function getAdminDashboardData(selected?: {
           selectedTrackingStudentId,
           trackingSummary,
           parashaSources,
-          error: slidesError ?? practiceEventsError ?? studentRecordingsError ?? partSettingsError ?? whatsappMessagesError ?? whatsappTemplateError,
+          error: slidesError ?? practiceEventsError ?? (listeningTableUnavailable ? null : listeningSessionsError) ?? studentRecordingsError ?? partSettingsError ?? whatsappMessagesError ?? whatsappTemplateError,
         }
       }
 
@@ -1003,6 +1195,18 @@ export async function getAdminDashboardData(selected?: {
         const current = eventsByPartId.get(event.lesson_part_id) ?? []
         current.push(event)
         eventsByPartId.set(event.lesson_part_id, current)
+      }
+
+      const listenedSecondsByPartId = new Map<number, number>()
+      for (const session of (listeningSessions ?? []) as Array<{
+        lesson_part_id: number
+        listened_seconds: number | null
+      }>) {
+        listenedSecondsByPartId.set(
+          session.lesson_part_id,
+          (listenedSecondsByPartId.get(session.lesson_part_id) ?? 0) +
+            Math.max(0, Number(session.listened_seconds ?? 0))
+        )
       }
 
       const groupById = new Map(groups.map((group) => [group.id, group]))
@@ -1102,6 +1306,7 @@ export async function getAdminDashboardData(selected?: {
             hasNikudVideo: availableVideoVariants.includes('nikud'),
             hasTikkunVideo: availableVideoVariants.includes('tikkun'),
             slideCount: slideCountByPartId.get(part.id) ?? 0,
+            listenedSeconds: listenedSecondsByPartId.get(part.id) ?? 0,
             practiceCount: events.length,
             completedCount: events.filter((event) => event.completed).length,
             lastPracticedAt: events[0]?.created_at ?? null,
@@ -1200,6 +1405,7 @@ export async function getAdminDashboardData(selected?: {
     lessonGroup,
     lessonParts,
     lessonSlides,
+    selectedPartReading,
     selectedParashaId,
     selectedSectionId,
     selectedPartId,

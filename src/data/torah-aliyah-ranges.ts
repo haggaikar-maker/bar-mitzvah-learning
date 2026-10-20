@@ -26,7 +26,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Genesis 5:25",
-      "end": "Genesis 6:4"
+      "end": "Genesis 6:8"
     }
   },
   "נח": {
@@ -56,7 +56,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Genesis 11:1",
-      "end": "Genesis 11:28"
+      "end": "Genesis 11:32"
     }
   },
   "לך לך": {
@@ -86,7 +86,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Genesis 17:7",
-      "end": "Genesis 17:23"
+      "end": "Genesis 17:27"
     }
   },
   "וירא": {
@@ -116,7 +116,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Genesis 22:1",
-      "end": "Genesis 22:19"
+      "end": "Genesis 22:24"
     }
   },
   "חיי שרה": {
@@ -146,7 +146,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Genesis 25:12",
-      "end": "Genesis 25:15"
+      "end": "Genesis 25:18"
     }
   },
   "תולדות": {
@@ -176,7 +176,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Genesis 28:5",
-      "end": "Genesis 28:6"
+      "end": "Genesis 28:9"
     }
   },
   "ויצא": {
@@ -206,7 +206,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Genesis 31:43",
-      "end": "Genesis 31:54"
+      "end": "Genesis 32:3"
     }
   },
   "וישלח": {
@@ -236,7 +236,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Genesis 36:20",
-      "end": "Genesis 36:39"
+      "end": "Genesis 36:43"
     }
   },
   "וישב": {
@@ -266,7 +266,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Genesis 40:1",
-      "end": "Genesis 40:19"
+      "end": "Genesis 40:23"
     }
   },
   "מקץ": {
@@ -296,7 +296,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Genesis 43:30",
-      "end": "Genesis 44:13"
+      "end": "Genesis 44:17"
     }
   },
   "ויגש": {
@@ -326,7 +326,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Genesis 47:11",
-      "end": "Genesis 47:24"
+      "end": "Genesis 47:27"
     }
   },
   "ויחי": {
@@ -356,7 +356,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Genesis 50:21",
-      "end": "Genesis 50:22"
+      "end": "Genesis 50:26"
     }
   },
   "שמות": {
@@ -386,7 +386,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Exodus 5:1",
-      "end": "Exodus 5:21"
+      "end": "Exodus 6:1"
     }
   },
   "וארא": {
@@ -416,7 +416,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Exodus 9:17",
-      "end": "Exodus 9:32"
+      "end": "Exodus 9:35"
     }
   },
   "בא": {
@@ -446,7 +446,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Exodus 13:1",
-      "end": "Exodus 13:13"
+      "end": "Exodus 13:16"
     }
   },
   "בשלח": {
@@ -476,7 +476,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Exodus 17:1",
-      "end": "Exodus 17:13"
+      "end": "Exodus 17:16"
     }
   },
   "יתרו": {
@@ -506,7 +506,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Exodus 20:15",
-      "end": "Exodus 20:18"
+      "end": "Exodus 20:23"
     }
   },
   "משפטים": {
@@ -536,7 +536,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Exodus 23:26",
-      "end": "Exodus 24:14"
+      "end": "Exodus 24:18"
     }
   },
   "תרומה": {
@@ -566,7 +566,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Exodus 27:9",
-      "end": "Exodus 27:16"
+      "end": "Exodus 27:19"
     }
   },
   "תצוה": {
@@ -596,7 +596,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Exodus 30:1",
-      "end": "Exodus 30:7"
+      "end": "Exodus 30:10"
     }
   },
   "כי תשא": {
@@ -626,7 +626,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Exodus 34:27",
-      "end": "Exodus 34:32"
+      "end": "Exodus 34:35"
     }
   },
   "ויקהל": {
@@ -656,7 +656,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Exodus 38:1",
-      "end": "Exodus 38:17"
+      "end": "Exodus 38:20"
     }
   },
   "פקודי": {
@@ -686,7 +686,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Exodus 40:28",
-      "end": "Exodus 40:33"
+      "end": "Exodus 40:38"
     }
   },
   "ויקרא": {
@@ -716,7 +716,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Leviticus 5:11",
-      "end": "Leviticus 5:23"
+      "end": "Leviticus 5:26"
     }
   },
   "צו": {
@@ -746,7 +746,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Leviticus 8:30",
-      "end": "Leviticus 8:31"
+      "end": "Leviticus 8:36"
     }
   },
   "שמיני": {
@@ -776,7 +776,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Leviticus 11:33",
-      "end": "Leviticus 11:44"
+      "end": "Leviticus 11:47"
     }
   },
   "תזריע": {
@@ -806,7 +806,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Leviticus 13:55",
-      "end": "Leviticus 13:56"
+      "end": "Leviticus 13:59"
     }
   },
   "מצורע": {
@@ -836,7 +836,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Leviticus 15:29",
-      "end": "Leviticus 15:30"
+      "end": "Leviticus 15:33"
     }
   },
   "אחרי מות": {
@@ -866,7 +866,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Leviticus 18:22",
-      "end": "Leviticus 18:27"
+      "end": "Leviticus 18:30"
     }
   },
   "קדושים": {
@@ -896,7 +896,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Leviticus 20:23",
-      "end": "Leviticus 20:24"
+      "end": "Leviticus 20:27"
     }
   },
   "אמור": {
@@ -926,7 +926,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Leviticus 24:1",
-      "end": "Leviticus 24:20"
+      "end": "Leviticus 24:23"
     }
   },
   "בהר": {
@@ -956,7 +956,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Leviticus 25:47",
-      "end": "Leviticus 25:54"
+      "end": "Leviticus 26:2"
     }
   },
   "בחוקותי": {
@@ -986,7 +986,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Leviticus 27:29",
-      "end": "Leviticus 27:31"
+      "end": "Leviticus 27:34"
     }
   },
   "במדבר": {
@@ -1016,7 +1016,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Numbers 4:1",
-      "end": "Numbers 4:16"
+      "end": "Numbers 4:20"
     }
   },
   "נשא": {
@@ -1046,7 +1046,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Numbers 7:72",
-      "end": "Numbers 7:86"
+      "end": "Numbers 7:89"
     }
   },
   "בהעלותך": {
@@ -1076,7 +1076,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Numbers 11:30",
-      "end": "Numbers 12:13"
+      "end": "Numbers 12:16"
     }
   },
   "שלח לך": {
@@ -1106,7 +1106,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Numbers 15:27",
-      "end": "Numbers 15:36"
+      "end": "Numbers 15:41"
     }
   },
   "קרח": {
@@ -1136,7 +1136,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Numbers 18:21",
-      "end": "Numbers 18:29"
+      "end": "Numbers 18:32"
     }
   },
   "חקת": {
@@ -1166,7 +1166,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Numbers 21:21",
-      "end": "Numbers 21:33"
+      "end": "Numbers 22:1"
     }
   },
   "בלק": {
@@ -1196,7 +1196,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Numbers 24:14",
-      "end": "Numbers 25:6"
+      "end": "Numbers 25:9"
     }
   },
   "פנחס": {
@@ -1226,7 +1226,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Numbers 29:12",
-      "end": "Numbers 29:34"
+      "end": "Numbers 30:1"
     }
   },
   "מטות": {
@@ -1256,7 +1256,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Numbers 32:20",
-      "end": "Numbers 32:38"
+      "end": "Numbers 32:42"
     }
   },
   "מסעי": {
@@ -1286,7 +1286,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Numbers 36:1",
-      "end": "Numbers 36:10"
+      "end": "Numbers 36:13"
     }
   },
   "דברים": {
@@ -1316,7 +1316,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Deuteronomy 3:15",
-      "end": "Deuteronomy 3:19"
+      "end": "Deuteronomy 3:22"
     }
   },
   "ואתחנן": {
@@ -1346,7 +1346,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Deuteronomy 7:1",
-      "end": "Deuteronomy 7:8"
+      "end": "Deuteronomy 7:11"
     }
   },
   "עקב": {
@@ -1406,7 +1406,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Deuteronomy 15:19",
-      "end": "Deuteronomy 16:12"
+      "end": "Deuteronomy 16:17"
     }
   },
   "שופטים": {
@@ -1436,7 +1436,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Deuteronomy 20:10",
-      "end": "Deuteronomy 21:6"
+      "end": "Deuteronomy 21:9"
     }
   },
   "כי תצא": {
@@ -1466,7 +1466,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Deuteronomy 24:14",
-      "end": "Deuteronomy 25:16"
+      "end": "Deuteronomy 25:19"
     }
   },
   "כי תבוא": {
@@ -1496,7 +1496,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Deuteronomy 29:1",
-      "end": "Deuteronomy 29:5"
+      "end": "Deuteronomy 29:8"
     }
   },
   "נצבים": {
@@ -1556,7 +1556,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Deuteronomy 31:25",
-      "end": "Deuteronomy 31:27"
+      "end": "Deuteronomy 31:30"
     }
   },
   "האזינו": {
@@ -1586,7 +1586,7 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Deuteronomy 32:44",
-      "end": "Deuteronomy 32:47"
+      "end": "Deuteronomy 32:52"
     }
   },
   "וזאת הברכה": {
@@ -1616,7 +1616,226 @@ export const torahAliyahRanges = {
     },
     "7": {
       "start": "Deuteronomy 34:1",
-      "end": "Deuteronomy 34:11"
+      "end": "Deuteronomy 34:12"
     }
+  }
+} as const
+
+export const torahMaftirRanges = {
+  "בראשית": {
+    "start": "Genesis 6:5",
+    "end": "Genesis 6:8"
+  },
+  "נח": {
+    "start": "Genesis 11:29",
+    "end": "Genesis 11:32"
+  },
+  "לך לך": {
+    "start": "Genesis 17:24",
+    "end": "Genesis 17:27"
+  },
+  "וירא": {
+    "start": "Genesis 22:20",
+    "end": "Genesis 22:24"
+  },
+  "חיי שרה": {
+    "start": "Genesis 25:16",
+    "end": "Genesis 25:18"
+  },
+  "תולדות": {
+    "start": "Genesis 28:7",
+    "end": "Genesis 28:9"
+  },
+  "ויצא": {
+    "start": "Genesis 32:1",
+    "end": "Genesis 32:3"
+  },
+  "וישלח": {
+    "start": "Genesis 36:40",
+    "end": "Genesis 36:43"
+  },
+  "וישב": {
+    "start": "Genesis 40:20",
+    "end": "Genesis 40:23"
+  },
+  "מקץ": {
+    "start": "Genesis 44:14",
+    "end": "Genesis 44:17"
+  },
+  "ויגש": {
+    "start": "Genesis 47:25",
+    "end": "Genesis 47:27"
+  },
+  "ויחי": {
+    "start": "Genesis 50:23",
+    "end": "Genesis 50:26"
+  },
+  "שמות": {
+    "start": "Exodus 5:22",
+    "end": "Exodus 6:1"
+  },
+  "וארא": {
+    "start": "Exodus 9:33",
+    "end": "Exodus 9:35"
+  },
+  "בא": {
+    "start": "Exodus 13:14",
+    "end": "Exodus 13:16"
+  },
+  "בשלח": {
+    "start": "Exodus 17:14",
+    "end": "Exodus 17:16"
+  },
+  "יתרו": {
+    "start": "Exodus 20:19",
+    "end": "Exodus 20:23"
+  },
+  "משפטים": {
+    "start": "Exodus 24:15",
+    "end": "Exodus 24:18"
+  },
+  "תרומה": {
+    "start": "Exodus 27:17",
+    "end": "Exodus 27:19"
+  },
+  "תצוה": {
+    "start": "Exodus 30:8",
+    "end": "Exodus 30:10"
+  },
+  "כי תשא": {
+    "start": "Exodus 34:33",
+    "end": "Exodus 34:35"
+  },
+  "ויקהל": {
+    "start": "Exodus 38:18",
+    "end": "Exodus 38:20"
+  },
+  "פקודי": {
+    "start": "Exodus 40:34",
+    "end": "Exodus 40:38"
+  },
+  "ויקרא": {
+    "start": "Leviticus 5:24",
+    "end": "Leviticus 5:26"
+  },
+  "צו": {
+    "start": "Leviticus 8:32",
+    "end": "Leviticus 8:36"
+  },
+  "שמיני": {
+    "start": "Leviticus 11:45",
+    "end": "Leviticus 11:47"
+  },
+  "תזריע": {
+    "start": "Leviticus 13:57",
+    "end": "Leviticus 13:59"
+  },
+  "מצורע": {
+    "start": "Leviticus 15:31",
+    "end": "Leviticus 15:33"
+  },
+  "אחרי מות": {
+    "start": "Leviticus 18:28",
+    "end": "Leviticus 18:30"
+  },
+  "קדושים": {
+    "start": "Leviticus 20:25",
+    "end": "Leviticus 20:27"
+  },
+  "אמור": {
+    "start": "Leviticus 24:21",
+    "end": "Leviticus 24:23"
+  },
+  "בהר": {
+    "start": "Leviticus 25:55",
+    "end": "Leviticus 26:2"
+  },
+  "בחוקותי": {
+    "start": "Leviticus 27:32",
+    "end": "Leviticus 27:34"
+  },
+  "במדבר": {
+    "start": "Numbers 4:17",
+    "end": "Numbers 4:20"
+  },
+  "נשא": {
+    "start": "Numbers 7:87",
+    "end": "Numbers 7:89"
+  },
+  "בהעלותך": {
+    "start": "Numbers 12:14",
+    "end": "Numbers 12:16"
+  },
+  "שלח לך": {
+    "start": "Numbers 15:37",
+    "end": "Numbers 15:41"
+  },
+  "קרח": {
+    "start": "Numbers 18:30",
+    "end": "Numbers 18:32"
+  },
+  "חקת": {
+    "start": "Numbers 21:34",
+    "end": "Numbers 22:1"
+  },
+  "בלק": {
+    "start": "Numbers 25:7",
+    "end": "Numbers 25:9"
+  },
+  "פנחס": {
+    "start": "Numbers 29:35",
+    "end": "Numbers 30:1"
+  },
+  "מטות": {
+    "start": "Numbers 32:39",
+    "end": "Numbers 32:42"
+  },
+  "מסעי": {
+    "start": "Numbers 36:11",
+    "end": "Numbers 36:13"
+  },
+  "דברים": {
+    "start": "Deuteronomy 3:20",
+    "end": "Deuteronomy 3:22"
+  },
+  "ואתחנן": {
+    "start": "Deuteronomy 7:9",
+    "end": "Deuteronomy 7:11"
+  },
+  "עקב": {
+    "start": "Deuteronomy 11:22",
+    "end": "Deuteronomy 11:25"
+  },
+  "ראה": {
+    "start": "Deuteronomy 16:13",
+    "end": "Deuteronomy 16:17"
+  },
+  "שופטים": {
+    "start": "Deuteronomy 21:7",
+    "end": "Deuteronomy 21:9"
+  },
+  "כי תצא": {
+    "start": "Deuteronomy 25:17",
+    "end": "Deuteronomy 25:19"
+  },
+  "כי תבוא": {
+    "start": "Deuteronomy 29:6",
+    "end": "Deuteronomy 29:8"
+  },
+  "נצבים": {
+    "start": "Deuteronomy 30:15",
+    "end": "Deuteronomy 30:20"
+  },
+  "וילך": {
+    "start": "Deuteronomy 31:28",
+    "end": "Deuteronomy 31:30"
+  },
+  "האזינו": {
+    "start": "Deuteronomy 32:48",
+    "end": "Deuteronomy 32:52"
+  },
+  "וזאת הברכה": {
+    "start": "Deuteronomy 34:10",
+    "end": "Deuteronomy 34:12"
   }
 } as const

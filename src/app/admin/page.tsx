@@ -1,8 +1,10 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { redirect } from 'next/navigation'
-import { getAdminDashboardData } from '@/lib/admin-data'
+import { getAdminDashboardData, getAdminLandingData } from '@/lib/admin-data'
 import { getAdminSession } from '@/lib/admin-auth'
+import { collectServerPerformance, measureServerPerformance } from '@/lib/server-performance'
+import { PerformanceDiagnostics } from '../../components/performance-diagnostics'
 import {
   getLessonMediaKindLabel,
 } from '@/lib/lesson-media'
@@ -11,7 +13,6 @@ import {
   getDaysUntilReading,
   getReadingCountdownLabel,
 } from '@/lib/student-schedule'
-import { supabase } from '@/lib/supabase'
 import {
   copyParashaStructure,
   deleteTeacherParasha,
@@ -36,12 +37,6 @@ import { DirectVideoUpload } from './direct-video-upload'
 import { AdminContentSelector, AdminEditorNavigator, AdminQueryForm } from './selectors'
 import { PendingSubmitButton } from '../../components/pending-submit-button'
 
-type SectionContentSummary = {
-  sectionId: number
-  partCount: number
-  hasContent: boolean
-}
-
 type AdminPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }
@@ -54,6 +49,17 @@ function toNumber(value: string | string[] | undefined) {
 
 function toStringParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value ?? ''
+}
+
+function formatListeningDuration(totalSeconds: number) {
+  const seconds = Math.max(0, Math.floor(totalSeconds))
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const remainder = seconds % 60
+
+  if (hours > 0) return `${hours} שע׳ ${minutes} דק׳`
+  if (minutes > 0) return `${minutes} דק׳ ${remainder} שנ׳`
+  return `${remainder} שנ׳`
 }
 
 function getTeacherParashaStatusLabel(status: string) {
@@ -124,6 +130,101 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     redirect('/')
   }
 
+  if (toStringParam(resolvedSearchParams.workspace) !== '1') {
+    const landing = await getAdminLandingData(session)
+
+    return (
+      <main className="min-h-screen bg-slate-50 p-4 sm:p-6">
+        <div className="mx-auto flex max-w-6xl flex-col gap-6">
+          <header className="flex flex-wrap items-center justify-between gap-4 rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200">
+            <div>
+              <p className="text-sm font-medium text-blue-700">אזור מנהל</p>
+              <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900">
+                שלום {session.displayName}
+              </h1>
+              <p className="mt-2 text-sm text-slate-600">
+                בחר תלמיד או ספריית פרשה כדי לטעון את כלי הניהול הרלוונטיים.
+              </p>
+            </div>
+            <nav className="flex flex-wrap gap-2">
+              <Link href="/admin/advanced" className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white">
+                ניהול מתקדם
+              </Link>
+              <Link href="/admin/text-sync" className="rounded-2xl bg-cyan-700 px-4 py-3 text-sm font-semibold text-white">
+                סטודיו קריאה מסונכרנת
+              </Link>
+              <Link href="/student" className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700">
+                צד תלמיד
+              </Link>
+              <form action={logoutAdmin}>
+                <button type="submit" className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white">
+                  יציאה
+                </button>
+              </form>
+            </nav>
+          </header>
+
+          {landing.error ? (
+            <div className="rounded-2xl bg-rose-50 p-4 text-sm text-rose-900 ring-1 ring-rose-200">
+              לא הצלחנו לטעון את הרשימות: {landing.error.message}
+            </div>
+          ) : null}
+
+          <div className="grid items-start gap-6 lg:grid-cols-2">
+            <section className="rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-2xl font-bold text-slate-900">תלמידים</h2>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-600">{landing.students.length}</span>
+              </div>
+              <div className="mt-4 space-y-2">
+                {landing.students.map((student) => (
+                  <Link
+                    key={student.id}
+                    href={`/admin?workspace=1&ownerAdminId=${student.admin_id ?? 'all'}&studentId=${student.id}&trackingStudentId=${student.id}`}
+                    className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 px-4 py-3 text-slate-800 hover:bg-slate-50"
+                  >
+                    <span className="font-semibold">{student.name}</span>
+                    <span className="text-sm text-blue-700">פתח ניהול תלמיד</span>
+                  </Link>
+                ))}
+                {landing.students.length === 0 ? (
+                  <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">לא נמצאו תלמידים.</p>
+                ) : null}
+              </div>
+            </section>
+
+            <section className="rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-2xl font-bold text-slate-900">ספריות פרשה</h2>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-600">{landing.teacherParashot.length}</span>
+              </div>
+              <div className="mt-4 space-y-2">
+                {landing.teacherParashot.map((parasha) => (
+                  <Link
+                    key={parasha.id}
+                    href={`/admin?workspace=1&openEditor=1&ownerAdminId=${parasha.owner_admin_id}&parashaId=${parasha.id}`}
+                    className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 px-4 py-3 text-slate-800 hover:bg-slate-50"
+                  >
+                    <span>
+                      <span className="block font-semibold">{parasha.internal_display_name}</span>
+                      <span className="mt-1 block text-xs text-slate-500">
+                        {parasha.owner_display_name} · {parasha.nusach_name} · {parasha.status}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-sm text-blue-700">פתח ניהול פרשה</span>
+                  </Link>
+                ))}
+                {landing.teacherParashot.length === 0 ? (
+                  <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">לא נמצאו ספריות פרשה.</p>
+                ) : null}
+              </div>
+            </section>
+          </div>
+        </div>
+      </main>
+    )
+  }
+
   const hasOwnerAdminIdParam = Object.prototype.hasOwnProperty.call(
     resolvedSearchParams,
     'ownerAdminId'
@@ -141,6 +242,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   const selectedLibraryView = toStringParam(resolvedSearchParams.libraryView) || 'single'
   const selectedStudentView = toStringParam(resolvedSearchParams.studentView) || 'single'
   const selectedStudentCardId = toNumber(resolvedSearchParams.studentId)
+  const loadImportSources = toStringParam(resolvedSearchParams.loadImports) === '1'
   const whatsappStatus = toStringParam(resolvedSearchParams.waStatus)
   const whatsappMessage = toStringParam(resolvedSearchParams.waMessage)
   const ownerAdminSelectValue =
@@ -160,6 +262,23 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         : (session.id ?? null)
       : (session.id ?? null)
 
+  const { value: dashboardData, metrics: performanceMetrics } = await collectServerPerformance(() =>
+    measureServerPerformance('page.admin.dashboard_data', () =>
+      getAdminDashboardData({
+        parashaId: selectedParashaId,
+        sectionId: selectedSectionId,
+        partId: selectedPartId,
+        studentId: selectedStudentCardId,
+        loadImportSources,
+        trackingStudentId: parsedTrackingStudentId,
+        ownerAdminId: effectiveOwnerAdminId,
+        teacherParashaStatus: selectedTeacherParashaStatus || null,
+        baseParashaFilterId: selectedBaseParashaFilterId,
+        nusachFilterId: selectedNusachFilterId,
+      }, session)
+    )
+  )
+
   const {
     parashot,
     teacherParashot = [],
@@ -170,6 +289,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     admins,
     lessonGroup,
     lessonParts,
+    selectedPartReading,
     selectedParashaId: activeParashaId,
     selectedSectionId: activeSectionId,
     selectedPartId: activePartId,
@@ -177,26 +297,19 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     trackingSummary,
     parashaSources,
     error,
-  } = await getAdminDashboardData({
-    parashaId: selectedParashaId,
-    sectionId: selectedSectionId,
-    partId: selectedPartId,
-    trackingStudentId: parsedTrackingStudentId,
-    ownerAdminId: effectiveOwnerAdminId,
-    teacherParashaStatus: selectedTeacherParashaStatus || null,
-    baseParashaFilterId: selectedBaseParashaFilterId,
-    nusachFilterId: selectedNusachFilterId,
-  }, session)
+  } = dashboardData
 
   const selectedTeacherParasha =
     teacherParashot.find((parasha) => parasha.id === activeParashaId) ?? null
+  const selectedTeacherRecord = admins.find((admin) => admin.id === effectiveOwnerAdminId) ?? null
   const selectedParasha =
     parashot.find((parasha) => parasha.id === selectedTeacherParasha?.parasha_id) ?? null
   const selectedSection = sections.find((section) => section.id === activeSectionId)
   const selectedPart = lessonParts.find((part) => part.id === activePartId) ?? null
-  const selectedPartMediaKind = 'video'
+  const selectedPartHasVideo = Boolean(
+    selectedPart?.video_url || selectedPart?.video_url_nikud || selectedPart?.video_url_tikkun
+  )
   const trackingRows = trackingSummary?.rows ?? []
-  const selectedPartTracking = trackingRows.find((row) => row.lessonPartId === selectedPart?.id) ?? null
   const selectedLibraryCardId = activeParashaId ?? teacherParashot[0]?.id ?? null
   const filteredStudentsForTeacher =
     effectiveOwnerAdminId
@@ -211,6 +324,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     filteredStudentsForTeacher.find((student) => student.id === normalizedSelectedStudentCardId) ??
     filteredStudentsForTeacher[0] ??
     null
+  const editorTeacherParashot = normalizedSelectedStudentCardId
+    ? teacherParashot.filter((parasha) =>
+        (selectedStudentCard?.assigned_teacher_parasha_ids ?? []).includes(parasha.id)
+      )
+    : teacherParashot
   const visibleTeacherParashot =
     selectedLibraryView === 'all'
       ? teacherParashot
@@ -221,21 +339,22 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
       : selectedStudentCard
         ? filteredStudentsForTeacher.filter((student) => student.id === selectedStudentCard.id)
         : []
-  const selectedTeacherRecord =
-    admins.find((admin) => admin.id === effectiveOwnerAdminId) ?? null
   const studentsByTeacherParashaId = new Map<number, typeof students>()
   const teacherParashaById = new Map(
     allTeacherParashot.map((teacherParasha) => [teacherParasha.id, teacherParasha] as const)
   )
 
   for (const student of students) {
-    if (!student.active_teacher_parasha_id) {
-      continue
+    const assignedIds = student.assigned_teacher_parasha_ids?.length
+      ? student.assigned_teacher_parasha_ids
+      : student.active_teacher_parasha_id
+        ? [student.active_teacher_parasha_id]
+        : []
+    for (const teacherParashaId of assignedIds) {
+      const current = studentsByTeacherParashaId.get(teacherParashaId) ?? []
+      current.push(student)
+      studentsByTeacherParashaId.set(teacherParashaId, current)
     }
-
-    const current = studentsByTeacherParashaId.get(student.active_teacher_parasha_id) ?? []
-    current.push(student)
-    studentsByTeacherParashaId.set(student.active_teacher_parasha_id, current)
   }
 
   const selectedLibraryStudents =
@@ -262,7 +381,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     Boolean(trackingSummary?.student.whatsapp_phone) &&
     trackingRows.some((row) =>
       row.isVisibleToStudent &&
-      (row.mediaKind === 'video' ? row.hasVideo : row.hasAudio && row.slideCount > 0)
+      (row.teacherReading ||
+        (row.mediaKind === 'video' ? row.hasVideo : row.hasAudio && row.slideCount > 0))
     )
   const currentAdminReturnParams = new URLSearchParams()
   for (const [key, value] of Object.entries(resolvedSearchParams)) {
@@ -278,6 +398,24 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   const currentAdminReturnPath = currentAdminReturnParams.size > 0
     ? `/admin?${currentAdminReturnParams.toString()}`
     : '/admin'
+  function getEditorPartHref(partId: number) {
+    const params = new URLSearchParams(currentAdminReturnParams)
+    params.set('partId', String(partId))
+    params.set('openEditor', '1')
+    return `/admin?${params.toString()}#content-editor`
+  }
+  function getEditorReturnHref() {
+    const params = new URLSearchParams(currentAdminReturnParams)
+    params.delete('partId')
+    params.set('openEditor', '1')
+    return `/admin?${params.toString()}#content-editor`
+  }
+  function getImportSourcesHref() {
+    const params = new URLSearchParams(currentAdminReturnParams)
+    params.set('loadImports', '1')
+    params.set('openEditor', '1')
+    return `/admin?${params.toString()}#content-editor`
+  }
   const teacherParashaStatusCounts = {
     active: teacherParashot.filter((item) => item.status === 'active').length,
     frozen: teacherParashot.filter((item) => item.status === 'frozen').length,
@@ -291,54 +429,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
       teacherParashaId: source.teacherParashaId,
     }))
   )
-  let sectionSummaries: SectionContentSummary[] = sections.map((section) => ({
-    sectionId: section.id,
-    partCount: 0,
-    hasContent: false,
-  }))
-
-  if (activeParashaId) {
-    const { data: sectionGroups } = await supabase
-      .from('lesson_groups')
-      .select('id, section_id')
-      .eq('teacher_parasha_id', activeParashaId)
-
-    const groups = (sectionGroups ?? []) as Array<{ id: number; section_id: number }>
-
-    if (groups.length > 0) {
-      const { data: groupParts } = await supabase
-        .from('lesson_parts')
-        .select('lesson_group_id')
-        .in(
-          'lesson_group_id',
-          groups.map((group) => group.id)
-        )
-
-      const partCountByGroupId = new Map<number, number>()
-
-      for (const part of (groupParts ?? []) as Array<{ lesson_group_id: number }>) {
-        partCountByGroupId.set(
-          part.lesson_group_id,
-          (partCountByGroupId.get(part.lesson_group_id) ?? 0) + 1
-        )
-      }
-
-      sectionSummaries = sections.map((section) => {
-        const group = groups.find((row) => row.section_id === section.id)
-        const partCount = group ? partCountByGroupId.get(group.id) ?? 0 : 0
-
-        return {
-          sectionId: section.id,
-          partCount,
-          hasContent: partCount > 0,
-        }
-      })
-    }
-  }
-
   return (
     <main className="min-h-screen bg-slate-50 p-4 sm:p-6">
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
+        <PerformanceDiagnostics metrics={performanceMetrics} />
         <header className="order-1 flex flex-wrap items-center justify-between gap-4 rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200">
           <div>
             <p className="text-sm font-medium text-blue-700">אזור מנהל</p>
@@ -351,33 +445,57 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             </p>
           </div>
 
-          <div className="flex gap-3">
-            <Link
-              href="/admin/text-sync"
-              className="rounded-2xl bg-cyan-700 px-4 py-3 text-sm font-semibold text-white"
-            >
-              סטודיו קריאה מסונכרנת
-            </Link>
-            <Link
-              href="/admin/advanced"
-              className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
-            >
-              ניהול מתקדם
-            </Link>
-            <Link
-              href="/student"
-              className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700"
-            >
-              מעבר לצד תלמיד
-            </Link>
-            <form action={logoutAdmin}>
-              <button
-                type="submit"
-                className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
+          <div className="flex w-full flex-col items-end gap-3">
+            <div className="flex flex-wrap justify-end gap-3">
+              <Link
+                href="/admin"
+                className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700"
               >
-                יציאה
-              </button>
-            </form>
+                חזרה לרשימות
+              </Link>
+              <Link
+                href="/admin/text-sync"
+                className="rounded-2xl bg-cyan-700 px-4 py-3 text-sm font-semibold text-white"
+              >
+                סטודיו קריאה מסונכרנת
+              </Link>
+              <Link
+                href="/admin/advanced"
+                className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white"
+              >
+                ניהול מתקדם
+              </Link>
+              <Link
+                href="/student"
+                className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700"
+              >
+                מעבר לצד תלמיד
+              </Link>
+              <form action={logoutAdmin}>
+                <button
+                  type="submit"
+                  className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
+                >
+                  יציאה
+                </button>
+              </form>
+            </div>
+            <nav aria-label="ניווט מהיר" className="w-full rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">
+              <div className="flex flex-wrap justify-end gap-2">
+              <a href="#tracking-panel" className="rounded-2xl bg-slate-900 px-4 py-3 text-center text-sm font-semibold text-white">
+                מעקב תרגולים
+              </a>
+              <a href="#content-editor" className="rounded-2xl bg-blue-600 px-4 py-3 text-center text-sm font-semibold text-white">
+                עריכת פרשה
+              </a>
+              <a href="#teacher-libraries" className="rounded-2xl bg-slate-100 px-4 py-3 text-center text-sm font-semibold text-slate-800">
+                ספריות פרשה
+              </a>
+              <a href="/admin/advanced" className="rounded-2xl bg-slate-100 px-4 py-3 text-center text-sm font-semibold text-slate-800">
+                ניהול והגדרות
+              </a>
+              </div>
+            </nav>
           </div>
         </header>
 
@@ -397,65 +515,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             {whatsappMessage}
           </div>
         ) : null}
-
-        <div className="order-2 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-          <section className="rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200">
-            <h2 className="text-2xl font-bold text-slate-900">בחירה וניווט מהיר</h2>
-            <p className="mt-2 text-sm leading-7 text-slate-600">
-              מתחילים ממלמד, ממשיכים לתלמיד או לספריית הפרשה שלו, ואז יורדים לעריכת התוכן.
-            </p>
-            <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <a
-                href="#tracking-panel"
-                className="rounded-2xl bg-slate-900 px-4 py-3 text-center text-sm font-semibold text-white"
-              >
-                מעקב תרגולים
-              </a>
-              <a
-                href="#content-editor"
-                className="rounded-2xl bg-blue-600 px-4 py-3 text-center text-sm font-semibold text-white"
-              >
-                עריכת פרשה
-              </a>
-              <a
-                href="#teacher-libraries"
-                className="rounded-2xl bg-slate-100 px-4 py-3 text-center text-sm font-semibold text-slate-800"
-              >
-                ספריות פרשה
-              </a>
-              <a
-                href="/admin/advanced"
-                className="rounded-2xl bg-slate-100 px-4 py-3 text-center text-sm font-semibold text-slate-800"
-              >
-                ניהול והגדרות
-              </a>
-            </div>
-          </section>
-
-          <section className="rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200">
-            <h2 className="text-xl font-bold text-slate-900">סינון פעיל</h2>
-            <div className="mt-4 space-y-3 text-sm text-slate-600">
-              <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">
-                <div className="text-xs text-slate-500">מלמד פעיל</div>
-                <div className="mt-1 text-lg font-bold text-slate-900">
-                  {selectedTeacherRecord?.display_name ?? 'כל המלמדים'}
-                </div>
-              </div>
-              <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">
-                <div className="text-xs text-slate-500">תלמידים בסינון</div>
-                <div className="mt-1 text-lg font-bold text-slate-900">
-                  {filteredStudentsForTeacher.length}
-                </div>
-              </div>
-              <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">
-                <div className="text-xs text-slate-500">ספרייה פתוחה לעריכה</div>
-                <div className="mt-1 text-lg font-bold text-slate-900">
-                  {selectedTeacherParasha?.internal_display_name ?? 'עדיין לא נבחרה'}
-                </div>
-              </div>
-            </div>
-          </section>
-        </div>
 
         <div id="tracking-panel" className="order-3">
         <DisclosureSection
@@ -617,6 +676,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                       <th className="px-3 py-2 font-semibold">חשיפה ותצוגה</th>
                       <th className="px-3 py-2 font-semibold">יעד</th>
                       <th className="px-3 py-2 font-semibold">מדיה</th>
+                      <th className="px-3 py-2 font-semibold">זמן האזנה</th>
                       <th className="px-3 py-2 font-semibold">הקלטת תלמיד</th>
                       <th className="px-3 py-2 font-semibold">הקלטת מלמד</th>
                       <th className="px-3 py-2 font-semibold">תרגולים</th>
@@ -692,6 +752,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                               : 'חסרה מדיה ישנה'}
                         </td>
                         <td className="px-3 py-3">
+                          {row.teacherReading
+                            ? formatListeningDuration(row.listenedSeconds)
+                            : '—'}
+                        </td>
+                        <td className="px-3 py-3">
                           {row.studentRecording ? (
                             <div className="grid gap-2">
                               {row.studentRecording.signedUrl ? (
@@ -738,9 +803,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                             const canSendReminder =
                               Boolean(trackingSummary.student.whatsapp_phone) &&
                               row.isVisibleToStudent &&
-                              (row.mediaKind === 'video'
-                                ? row.hasVideo
-                                : row.hasAudio && row.slideCount > 0)
+                              (row.teacherReading ||
+                                (row.mediaKind === 'video'
+                                  ? row.hasVideo
+                                  : row.hasAudio && row.slideCount > 0))
 
                             return (
                           <form action={sendStudentWhatsAppPracticeMessage}>
@@ -872,7 +938,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         <div className="order-5 grid items-start gap-6">
           <div className="xl:col-span-2">
           <DisclosureSection
-            defaultOpen
             title="ספריות פרשה של מלמדים"
             description="כאן בוחרים ספריית עבודה, רואים אילו תלמידים משויכים אליה, ומשם ממשיכים לעריכת הפרשה עצמה."
           >
@@ -942,17 +1007,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     {nusach.name}
                   </option>
                 ))}
-              </select>
-              <select
-                name="teacherParashaStatus"
-                defaultValue={selectedTeacherParashaStatus || 'all'}
-                className="rounded-2xl border border-slate-200 px-4 py-3"
-              >
-                <option value="all">כל הסטטוסים</option>
-                <option value="active">פעילה</option>
-                <option value="frozen">קפואה</option>
-                <option value="draft">טיוטה</option>
-                <option value="archived">ארכיון</option>
               </select>
               <select
                 name="libraryView"
@@ -1392,18 +1446,22 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           </DisclosureSection>
         </div>
 
-        <section
+        <details
           id="content-editor"
+          open={toStringParam(resolvedSearchParams.openEditor) === '1'}
           className="order-4 rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-200"
         >
-          <div className="flex flex-wrap items-center justify-between gap-4">
+          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-4">
             <div>
               <h2 className="text-2xl font-bold text-slate-900">עריכת פרשה ספציפית</h2>
               <p className="mt-2 text-sm text-slate-600">
-                כאן עובדים לפי הסדר הבא: בוחרים מלמד, אפשר להיכנס דרך תלמיד מסוים, ואז עורכים את הספרייה, החלקים ותתי־החלקים.
+                פתיחת האזור תציג את בחירת המלמד, התלמיד והפרשה ואת כלי העריכה.
               </p>
             </div>
-          </div>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+              פתיחה
+            </span>
+          </summary>
 
           <div className="mt-6 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
             <div className="rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
@@ -1495,9 +1553,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           <div className="mt-6">
             <AdminContentSelector
               key={`${activeParashaId ?? 'none'}-${activeSectionId ?? 'none'}-${activePartId ?? 'none'}`}
-              teacherParashot={teacherParashot}
+              teacherParashot={editorTeacherParashot}
               sections={sections}
-              sectionSummaries={sectionSummaries}
               lessonParts={lessonParts}
               selectedParashaId={activeParashaId}
               selectedSectionId={activeSectionId}
@@ -1537,62 +1594,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           </div>
 
           {selectedTeacherParasha ? (
-            <div className="mt-6 grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-              <div className="rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <h3 className="text-lg font-semibold text-slate-900">תצוגת תוכן לספרייה הנבחרת</h3>
-                <p className="mt-2 text-sm text-slate-600">
-                  כאן אפשר לעיין בגרסאות הווידאו של התת־חלק הפתוח בלי להיכנס לשדות העריכה.
-                </p>
-
-                {selectedPart ? (
-                  <div className="mt-4 grid gap-4">
-                    <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
-                      <div className="text-sm font-semibold text-slate-900">{selectedPart.name}</div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        {selectedSection?.name ?? 'ללא חלק'} | {getLessonMediaKindLabel(selectedPartMediaKind)}
-                      </div>
-                    </div>
-
-                    {selectedPart.video_url_nikud || selectedPart.video_url ? (
-                      <div className="grid gap-2 rounded-3xl bg-white p-4 ring-1 ring-slate-200">
-                        <div className="text-sm font-semibold text-slate-900">וידאו עם ניקוד</div>
-                        <video
-                          controls
-                          className="w-full rounded-3xl bg-slate-900"
-                          src={selectedPart.video_url_nikud ?? selectedPart.video_url ?? undefined}
-                        />
-                      </div>
-                    ) : null}
-
-                    {selectedPart.video_url_tikkun ? (
-                      <div className="grid gap-2 rounded-3xl bg-white p-4 ring-1 ring-slate-200">
-                        <div className="text-sm font-semibold text-slate-900">וידאו תיקון סופרים</div>
-                        <video
-                          controls
-                          className="w-full rounded-3xl bg-slate-900"
-                          src={selectedPart.video_url_tikkun}
-                        />
-                      </div>
-                    ) : null}
-
-                    {selectedPartTracking?.teacherReading ? (
-                      <div className="grid gap-2 rounded-3xl bg-white p-4 ring-1 ring-cyan-200">
-                        <div className="text-sm font-semibold text-slate-900">
-                          הקלטת המלמד לתלמיד {trackingSummary?.student.name}: {selectedPartTracking.teacherReading.sourceRef}
-                        </div>
-                        <audio controls className="w-full" src={selectedPartTracking.teacherReading.audioUrl} />
-                      </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="mt-4 rounded-2xl bg-white p-4 text-sm text-slate-500 ring-1 ring-slate-200">
-                    בחר תת־חלק כדי לצפות כאן בגרסאות הווידאו שלו.
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <h3 className="text-lg font-semibold text-slate-900">שליטה על הספרייה</h3>
+          <div className="mt-6 flex flex-col">
+              <div className="order-last">
+              <details className="rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                <summary className="cursor-pointer list-none text-lg font-semibold text-slate-900">שליטה על הספרייה</summary>
                 <p className="mt-2 text-sm text-slate-600">
                   מנהל ראשי יכול להקפיא, לארכב או למחוק את ספריית הפרשה שנבחרה. מלמד רגיל יכול לשלוט רק על הספריות שלו.
                 </p>
@@ -1646,17 +1651,26 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     </button>
                   </form>
                 </div>
+              </details>
               </div>
             </div>
           ) : null}
 
           {selectedTeacherParasha ? (
-            <details className="mt-6 rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
+            <details open={loadImportSources} className="order-last mt-6 rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
               <summary className="cursor-pointer list-none text-lg font-semibold text-slate-900">
                 העתקת מבנה וייבוא מספריות אחרות
               </summary>
-              <div className="mt-4 rounded-3xl bg-slate-50 p-1">
-                <div className="rounded-3xl bg-white p-4 ring-1 ring-slate-200">
+              {!loadImportSources ? (
+                <div className="mt-4 rounded-2xl bg-white p-4 text-sm text-slate-600 ring-1 ring-slate-200">
+                  נתוני ספריות המקור ייטענו רק כשתבקש לייבא, כדי לא לעכב את פתיחת התלמיד.
+                  <Link href={getImportSourcesHref()} className="mt-3 block font-semibold text-blue-700">
+                    טען ספריות מקור לייבוא
+                  </Link>
+                </div>
+              ) : null}
+              {loadImportSources ? (
+              <div className="mt-4 rounded-3xl bg-white p-4 ring-1 ring-slate-200">
                 <h3 className="text-lg font-semibold text-slate-900">
                   העתקת מבנה לפרשה {selectedTeacherParasha.internal_display_name}
                 </h3>
@@ -1718,7 +1732,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   </p>
                 ) : null}
               </div>
-              </div>
+              ) : null}
             </details>
           ) : null}
 
@@ -1748,7 +1762,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 </p>
                 <div className="mt-4 space-y-4">
                   {lessonParts.map((part) => (
-                    <form key={part.id} action={upsertLessonPart} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
+                    <div key={part.id} className="grid gap-3 rounded-3xl bg-slate-50 p-4">
+                    <form action={upsertLessonPart} className="grid gap-3">
                       <input type="hidden" name="id" value={part.id} />
                       <input type="hidden" name="return_path" value={currentAdminReturnPath} />
                       <input
@@ -1804,7 +1819,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                           className="rounded-2xl border border-slate-200 px-4 py-3"
                         />
                         <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                          וידאו
+                          {[part.video_url || part.video_url_nikud || part.video_url_tikkun ? 'וידאו' : null, part.has_synchronized_reading ? 'הקלטה מתוזמנת' : null].filter(Boolean).join(' + ') || 'ללא מדיה'}
                         </div>
                       </div>
                       <input type="hidden" name="media_kind" value="video" />
@@ -1826,26 +1841,35 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         </label>
                       </div>
                       <div className="rounded-2xl bg-white p-3 text-sm text-slate-600 ring-1 ring-slate-200">
-                        <div>סוג מדיה: {getLessonMediaKindLabel('video')}</div>
-                        <div className="mt-2 break-all">
-                          {part.video_url_nikud || part.video_url
-                            ? `עם ניקוד: ${part.video_url_nikud ?? part.video_url}`
-                            : 'עם ניקוד: עדיין לא הוגדר'}
+                        <div>
+                          סוג מדיה: {[part.video_url || part.video_url_nikud || part.video_url_tikkun ? 'וידאו' : null, part.has_synchronized_reading ? 'הקלטה מתוזמנת' : null].filter(Boolean).join(' + ') || 'ללא מדיה'}
                         </div>
-                        <div className="mt-2 break-all">
-                          {part.video_url_tikkun
-                            ? `תיקון סופרים: ${part.video_url_tikkun}`
-                            : 'תיקון סופרים: עדיין לא הוגדר'}
-                        </div>
-                        <div className="mt-2">
-                          משך המדיה:{' '}
-                          <AudioDuration
-                            src={part.video_url_nikud ?? part.video_url ?? part.video_url_tikkun}
-                            kind="video"
-                            fallback="ללא מדיה"
-                            loadingLabel="טוען משך וידאו..."
-                          />
-                        </div>
+                        {part.video_url || part.video_url_nikud || part.video_url_tikkun ? (
+                          <>
+                            <div className="mt-2 break-all">
+                              {part.video_url_nikud || part.video_url
+                                ? `עם ניקוד: ${part.video_url_nikud ?? part.video_url}`
+                                : 'עם ניקוד: עדיין לא הוגדר'}
+                            </div>
+                            <div className="mt-2 break-all">
+                              {part.video_url_tikkun
+                                ? `תיקון סופרים: ${part.video_url_tikkun}`
+                                : 'תיקון סופרים: עדיין לא הוגדר'}
+                            </div>
+                            <div className="mt-2">
+                              משך המדיה:{' '}
+                              <AudioDuration
+                                src={part.video_url_nikud ?? part.video_url ?? part.video_url_tikkun}
+                                kind="video"
+                                fallback="ללא מדיה"
+                                loadingLabel="טוען משך וידאו..."
+                              />
+                            </div>
+                          </>
+                        ) : null}
+                        {part.has_synchronized_reading ? (
+                          <div className="mt-2 text-cyan-800">קיימת הקלטה מתוזמנת</div>
+                        ) : null}
                       </div>
                       <label className="flex items-center gap-3 text-sm text-slate-700">
                         <input
@@ -1862,23 +1886,25 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         >
                           שמירת מבנה
                         </button>
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <Link
-                            href={`/admin?parashaId=${activeParashaId ?? ''}&sectionId=${activeSectionId ?? ''}&partId=${part.id}#content-editor`}
-                            className="rounded-2xl bg-blue-600 px-4 py-3 text-center text-sm font-semibold text-white"
-                          >
-                            עריכת מדיה
-                          </Link>
-                          <button
-                            formAction={deleteLessonPart}
-                            type="submit"
-                            className="rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white"
-                          >
-                            מחיקת תת־חלק
-                          </button>
-                        </div>
+                        <Link
+                          href={getEditorPartHref(part.id)}
+                          className="rounded-2xl bg-blue-600 px-4 py-3 text-center text-sm font-semibold text-white"
+                        >
+                          עריכת מדיה
+                        </Link>
                       </div>
                     </form>
+                    <form action={deleteLessonPart} className="mt-3">
+                      <input type="hidden" name="id" value={part.id} />
+                      <input type="hidden" name="return_path" value={getEditorReturnHref()} />
+                      <PendingSubmitButton
+                        label="מחיקת תת־חלק"
+                        pendingLabel="מוחק..."
+                        confirmMessage={`${part.has_synchronized_reading || part.video_url || part.video_url_nikud || part.video_url_tikkun ? `ישנם ${[part.has_synchronized_reading ? 'הקלטה מתוזמנת' : null, part.video_url || part.video_url_nikud || part.video_url_tikkun ? 'וידאו' : null].filter(Boolean).join(' ו')} לתת־החלק. ` : ''}האם אתה בטוח שברצונך למחוק את תת־החלק "${selectedSection?.name ?? ''}, ${part.name}"? הפעולה תמחק גם נתוני תרגול והקלטות תלמידים המשויכים אליו.`}
+                        className="rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white"
+                      />
+                    </form>
+                    </div>
                   ))}
                 </div>
 
@@ -1951,10 +1977,54 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 <h3 className="text-xl font-bold text-slate-900">מדיה לקטע הנבחר</h3>
                 {activePartId ? (
                   <>
+                    {selectedPartReading ? (
+                      <div className="mt-4 grid gap-3 rounded-3xl bg-cyan-50 p-4 ring-1 ring-cyan-200">
+                        <div>
+                          <h4 className="font-semibold text-cyan-950">הקלטה מתוזמנת</h4>
+                          <p className="mt-1 text-sm text-cyan-900">
+                            {selectedPartReading.sourceRef} · {selectedPartReading.wordCount} מילים
+                          </p>
+                        </div>
+                        <audio controls preload="none" className="w-full" src={selectedPartReading.audioUrl} />
+                        <details className="rounded-2xl bg-white p-3 ring-1 ring-cyan-100">
+                          <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+                            הצגת הטקסט המתוזמן
+                          </summary>
+                          <p className="mt-3 whitespace-pre-wrap text-sm leading-8 text-slate-700">
+                            {selectedPartReading.sourceText}
+                          </p>
+                        </details>
+                      </div>
+                    ) : null}
+                    {selectedPartHasVideo ? (
+                      <div className="mt-4 grid gap-3 rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                        {selectedPart?.video_url_nikud || selectedPart?.video_url ? (
+                          <video
+                            controls
+                            preload="none"
+                            className="w-full rounded-2xl"
+                            src={selectedPart.video_url_nikud ?? selectedPart.video_url ?? undefined}
+                          />
+                        ) : null}
+                        {selectedPart?.video_url_tikkun ? (
+                          <video controls preload="none" className="w-full rounded-2xl" src={selectedPart.video_url_tikkun} />
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {!selectedPartReading && !selectedPartHasVideo ? (
+                      <p className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+                        אין עדיין וידאו או הקלטה מתוזמנת לתת־החלק הזה.
+                      </p>
+                    ) : null}
+                    <details className="mt-4 rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                        <summary className="cursor-pointer font-semibold text-slate-800">
+                          {selectedPartHasVideo ? 'ניהול וידאו' : 'הוספת וידאו'}
+                        </summary>
                     <form action={upsertLessonPart} className="mt-4 grid gap-3 rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
                       <h4 className="text-lg font-semibold text-slate-900">
                         מדיה עבור {selectedPart?.name}
                       </h4>
+                      <input type="hidden" name="return_path" value={currentAdminReturnPath} />
                       <input type="hidden" name="id" value={selectedPart?.id ?? ''} />
                       <input
                         type="hidden"
@@ -1986,11 +2056,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         name="completion_target"
                         value={selectedPart?.completion_target ?? 3}
                       />
-                      <input
-                        type="hidden"
-                        name="media_kind"
-                        value={selectedPartMediaKind}
-                      />
+                      <input type="hidden" name="media_kind" value="video" />
                       {(selectedPart?.is_visible_to_student ?? true) ? (
                         <input type="hidden" name="is_visible_to_student" value="on" />
                       ) : null}
@@ -2044,25 +2110,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         filenameSuffix="tikkun"
                         initialVideoUrl={selectedPart?.video_url_tikkun ?? ''}
                       />
-                      <div className="rounded-2xl bg-white p-3 text-sm text-slate-700 ring-1 ring-slate-200">
-                        משך המדיה:{' '}
-                        <AudioDuration
-                          src={selectedPart?.video_url_nikud ?? selectedPart?.video_url ?? selectedPart?.video_url_tikkun}
-                          kind="video"
-                          fallback="אין וידאו"
-                          loadingLabel="טוען משך וידאו..."
-                        />
-                      </div>
-                      {selectedPart?.video_url_nikud || selectedPart?.video_url ? (
-                        <video
-                          controls
-                          className="w-full rounded-2xl"
-                          src={selectedPart?.video_url_nikud ?? selectedPart?.video_url ?? undefined}
-                        />
-                      ) : null}
-                      {selectedPart?.video_url_tikkun ? (
-                        <video controls className="w-full rounded-2xl" src={selectedPart.video_url_tikkun} />
-                      ) : null}
                       <button
                         type="submit"
                         className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
@@ -2070,11 +2117,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         שמירת וידאו לקטע
                       </button>
                     </form>
-
-                    <div className="mt-4 rounded-3xl bg-slate-50 p-4 text-sm text-slate-600">
-                      השקופיות הוסרו מהזרימה הפעילה. לכל תת־חלק אפשר לשייך כאן
-                      וידאו עם ניקוד, וידאו תיקון סופרים, או את שניהם.
-                    </div>
+                    </details>
                   </>
                 ) : (
                   <div className="mt-4 rounded-3xl bg-slate-50 p-4 text-sm text-slate-600">
@@ -2084,7 +2127,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               </div>
             </div>
           ) : null}
-        </section>
+        </details>
 
       </div>
     </main>

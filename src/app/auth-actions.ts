@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { clearAdminSession, createAdminSession, getConfiguredAdmin } from '@/lib/admin-auth'
 import { verifyPassword } from '@/lib/admin-security'
 import { createStudentSession, clearStudentSession } from '@/lib/student-auth'
+import { measureServerPerformance } from '@/lib/server-performance'
 import { supabase } from '@/lib/supabase'
 
 function readString(formData: FormData, key: string) {
@@ -33,11 +34,13 @@ export async function loginUser(formData: FormData) {
     redirect('/?error=missing')
   }
 
-  const { data: admin } = await supabase
-    .from('admins')
-    .select('id, username, password_hash')
-    .eq('username', username)
-    .maybeSingle()
+  const { data: admin } = await measureServerPerformance('login.admin_lookup', () =>
+    supabase
+      .from('admins')
+      .select('id, username, password_hash')
+      .eq('username', username)
+      .maybeSingle()
+  )
 
   if (admin && verifyPassword(password, admin.password_hash)) {
     await clearStudentSession()
@@ -55,11 +58,13 @@ export async function loginUser(formData: FormData) {
     redirect(nextPath?.startsWith('/admin') ? nextPath : '/admin')
   }
 
-  const { data: student } = await supabase
-    .from('students')
-    .select('id, username, password_hash')
-    .eq('username', username)
-    .maybeSingle()
+  const { data: student } = await measureServerPerformance('login.student_lookup', () =>
+    supabase
+      .from('students')
+      .select('id, username, password_hash')
+      .eq('username', username)
+      .maybeSingle()
+  )
 
   if (student && student.password_hash && verifyPassword(password, student.password_hash)) {
     await clearAdminSession()

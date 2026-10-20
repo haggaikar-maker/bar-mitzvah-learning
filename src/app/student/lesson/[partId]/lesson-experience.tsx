@@ -11,6 +11,7 @@ import {
 } from 'react'
 import {
   deleteMyStudentRecording,
+  recordListeningProgress,
   recordPracticeEvent,
   saveStudentRecording,
 } from '../../actions'
@@ -35,6 +36,14 @@ type LessonExperienceProps = {
   studentRecording: StudentRecording | null
   lessonPartId: number
   showStudentRecording?: boolean
+  completionTarget: number
+  initialListenedSeconds: number
+  initialCompletedSessions: number
+}
+
+function formatListeningTime(seconds: number) {
+  const safeSeconds = Math.max(0, Math.floor(seconds))
+  return `${Math.floor(safeSeconds / 60)}:${String(safeSeconds % 60).padStart(2, '0')}`
 }
 
 export default function LessonExperience({
@@ -48,6 +57,9 @@ export default function LessonExperience({
   studentRecording,
   lessonPartId,
   showStudentRecording = true,
+  completionTarget,
+  initialListenedSeconds,
+  initialCompletedSessions,
 }: LessonExperienceProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -60,9 +72,11 @@ export default function LessonExperience({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const lastStableTimeRef = useRef(0)
   const loggedPracticeRef = useRef(false)
-  const completionLoggedRef = useRef(false)
-  const playbackStartedAtBeginningRef = useRef(false)
-  const continuousPlaybackRef = useRef(false)
+  const listeningSessionIdRef = useRef<string | null>(null)
+  const listeningIntervalsRef = useRef<Array<{ start: number; end: number }>>([])
+  const listenedSecondsRef = useRef(0)
+  const previousListeningTimeRef = useRef<number | null>(null)
+  const lastListeningSaveAtRef = useRef(0)
   const closeAfterStopRef = useRef<'save' | 'discard' | null>(null)
 
   const [currentTime, setCurrentTime] = useState(0)
@@ -75,6 +89,8 @@ export default function LessonExperience({
   const [mediaDuration, setMediaDuration] = useState<number | null>(
     durationSeconds
   )
+  const [listenedSeconds, setListenedSeconds] = useState(initialListenedSeconds)
+  const [completedSessions, setCompletedSessions] = useState(initialCompletedSessions)
   const [isRecording, setIsRecording] = useState(false)
   const [isRecordingBusy, setIsRecordingBusy] = useState(false)
   const [recordingStatus, setRecordingStatus] = useState<string | null>(null)
@@ -256,16 +272,35 @@ export default function LessonExperience({
     }
 
     if (!loggedPracticeRef.current) {
-      const startsAtBeginning = media.currentTime <= 0.75
-      playbackStartedAtBeginningRef.current = startsAtBeginning
-      continuousPlaybackRef.current = startsAtBeginning
       loggedPracticeRef.current = true
+      listeningSessionIdRef.current = crypto.randomUUID()
+      listenedSecondsRef.current = 0
+      listeningIntervalsRef.current = []
+      previousListeningTimeRef.current = null
 
       startTransition(() => {
         void logEvent(false, 'התרגול נרשם. השלמה תישמר אוטומטית בסוף האזנה רציפה.')
       })
-    } else if (media.currentTime < media.duration - 0.5) {
-      continuousPlaybackRef.current = false
+    }
+  }
+
+  async function flushListeningProgress() {
+    const sessionId = listeningSessionIdRef.current
+    const totalDuration = mediaDuration && mediaDuration > 0 ? mediaDuration : durationSeconds ?? 0
+    if (!sessionId || totalDuration <= 0 || listenedSecondsRef.current <= 0) return
+    lastListeningSaveAtRef.current = Date.now()
+    try {
+      const result = await recordListeningProgress({
+        sessionId,
+        lessonPartId,
+        durationSeconds: Math.round(totalDuration),
+        listenedSeconds: Math.floor(listenedSecondsRef.current),
+        intervals: listeningIntervalsRef.current,
+      })
+      setListenedSeconds(result.listenedSeconds)
+      setCompletedSessions(result.completedSessions)
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'לא הצלחנו לשמור את זמן ההאזנה.')
     }
   }
 
@@ -277,6 +312,19 @@ export default function LessonExperience({
     }
 
     setCurrentTime(media.currentTime)
+    const currentTime = media.currentTime
+    const previousTime = previousListeningTimeRef.current
+    if (!media.paused && previousTime !== null) {
+      const delta = currentTime - previousTime
+      if (delta > 0 && delta <= 0.75) {
+        listenedSecondsRef.current += delta
+        const last = listeningIntervalsRef.current.at(-1)
+        if (last && previousTime <= last.end + 0.2) last.end = Math.max(last.end, currentTime)
+        else listeningIntervalsRef.current.push({ start: previousTime, end: currentTime })
+      }
+      if (Date.now() - lastListeningSaveAtRef.current >= 10000) void flushListeningProgress()
+    }
+    previousListeningTimeRef.current = currentTime
     lastStableTimeRef.current = media.currentTime
   }
 
@@ -287,9 +335,8 @@ export default function LessonExperience({
       return
     }
 
-    if (media.currentTime > 0 && media.currentTime < media.duration - 0.5) {
-      continuousPlaybackRef.current = false
-    }
+    previousListeningTimeRef.current = null
+    void flushListeningProgress()
   }
 
   function handleSeeking() {
@@ -299,27 +346,11 @@ export default function LessonExperience({
       return
     }
 
-    if (Math.abs(media.currentTime - lastStableTimeRef.current) > 1.5) {
-      continuousPlaybackRef.current = false
-    }
+    if (Math.abs(media.currentTime - lastStableTimeRef.current) > 1.5) previousListeningTimeRef.current = null
   }
 
   function handleEnded() {
-    const canComplete =
-      playbackStartedAtBeginningRef.current &&
-      continuousPlaybackRef.current &&
-      !completionLoggedRef.current
-
-    if (!canComplete) {
-      setStatusMessage('ההאזנה הסתיימה, אבל לא ברצף מלא מתחילת הקטע ולכן לא סומנה כהשלמה.')
-      return
-    }
-
-    completionLoggedRef.current = true
-
-    startTransition(() => {
-      void logEvent(true, 'כל הכבוד, הקטע הושלם בהאזנה רציפה וסומן אוטומטית.')
-    })
+    void flushListeningProgress()
   }
 
   function jumpToSlide(index: number) {
@@ -335,7 +366,7 @@ export default function LessonExperience({
     if (media) {
       media.currentTime = slide.start_second
       setCurrentTime(slide.start_second)
-      continuousPlaybackRef.current = false
+      previousListeningTimeRef.current = null
     }
   }
 
@@ -601,7 +632,7 @@ export default function LessonExperience({
               {mediaKind === 'video' ? 'נגן וידאו' : 'נגן אודיו'}
             </p>
             <span className="student-badge bg-white/80 text-slate-700 ring-1 ring-white/80">
-              הקשבה רציפה = השלמה
+              השלמה לפי 80% כיסוי
             </span>
           </div>
 
@@ -680,9 +711,14 @@ export default function LessonExperience({
             <p className="text-sm text-slate-500">עדיין לא הוגדר קובץ מדיה.</p>
           )}
 
-          <p className="mt-3 text-sm text-slate-500">
-            השלמה תסומן רק אם {mediaKind === 'video' ? 'הווידאו' : 'הקטע'} נוגן ברציפות מתחילתו ועד סופו.
-          </p>
+          {sourceDuration ? <div className="mt-3 rounded-2xl bg-cyan-50 p-3 text-sm ring-1 ring-cyan-100">
+            <div className="flex flex-wrap justify-between gap-2 font-bold text-slate-800">
+              <span>יעד האזנה: {formatListeningTime(sourceDuration * completionTarget)} ({completionTarget} חזרות)</span>
+              <span>{Math.min(100, Math.round((listenedSeconds / Math.max(sourceDuration * completionTarget, 1)) * 100))}% · {formatListeningTime(listenedSeconds)} / {formatListeningTime(sourceDuration * completionTarget)}</span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-cyan-100"><div className="h-full rounded-full bg-cyan-700 transition-[width]" style={{ width: `${Math.min(100, (listenedSeconds / Math.max(sourceDuration * completionTarget, 1)) * 100)}%` }} /></div>
+            <p className="mt-2 text-xs text-slate-600">השלמות בסשן ({'≥'}80% מהקטע): {completedSessions}/{completionTarget}</p>
+          </div> : null}
         </div>
 
         {mediaKind === 'audio_slides' ? (

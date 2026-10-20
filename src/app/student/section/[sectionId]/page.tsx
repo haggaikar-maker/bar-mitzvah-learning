@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation'
 import { logoutUser } from '../../../auth-actions'
 import { getSectionPageData } from '@/lib/practice-data'
+import { collectServerPerformance, measureServerPerformance } from '@/lib/server-performance'
+import { PerformanceDiagnostics } from '../../../../components/performance-diagnostics'
 import { AudioDuration } from '../../../../components/audio-duration'
 import { requireStudentSession } from '@/lib/student-auth'
 import { PendingSubmitButton } from '../../../../components/pending-submit-button'
@@ -24,8 +26,12 @@ export default async function SectionPartsPage({
     )
   }
 
-  const { student, section, parts, error } =
-    await getSectionPageData(sectionIdNumber, session.id)
+  const { value: sectionData, metrics: performanceMetrics } = await collectServerPerformance(() =>
+    measureServerPerformance('page.student.section_data', () =>
+      getSectionPageData(sectionIdNumber, session.id)
+    )
+  )
+  const { student, section, parts, error } = sectionData
 
   if (error && !student) {
     return (
@@ -52,6 +58,7 @@ export default async function SectionPartsPage({
   return (
     <main className="student-app">
       <div className="student-shell max-w-6xl">
+        <PerformanceDiagnostics metrics={performanceMetrics} />
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <StudentNavLink
             href="/student"

@@ -1,0 +1,8 @@
+requests==2.34.2
+numpy==2.5.4
+Pillow==11.3.0
+moviepy==2.2.1
+proglog==0.1.12
+openai-whisper==20250625
+pytesseract==0.3.13
+pydub==0.25.1

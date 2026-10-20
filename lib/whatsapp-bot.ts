@@ -1,7 +1,6 @@
 import 'server-only'
 
 import {
-  getAvailableLessonVideoVariants,
   getLessonMediaKind,
   getLessonMediaUrl,
   resolveLessonVideoVariant,
@@ -205,7 +204,12 @@ function isReadyForWhatsApp(input: {
   audioUrl: string | null
   videoUrl: string | null
   slideCount: number
+  hasSynchronizedReading?: boolean
 }) {
+  if (input.hasSynchronizedReading) {
+    return true
+  }
+
   if (input.mediaKind === 'video') {
     return Boolean(input.videoUrl)
   }
@@ -355,6 +359,7 @@ async function buildStudentWhatsAppCatalogSnapshot(
     { data: slideRows, error: slidesError },
     { data: settingRows, error: settingsError },
     { data: practiceRows, error: practiceError },
+    { data: synchronizedReadings, error: synchronizedReadingsError },
   ] = await Promise.all([
     supabaseAdmin
       .from('lesson_slides')
@@ -370,13 +375,19 @@ async function buildStudentWhatsAppCatalogSnapshot(
       .select('lesson_part_id, completed')
       .eq('student_id', studentId)
       .in('lesson_part_id', partIds),
+    supabaseAdmin
+      .from('student_lesson_part_readings')
+      .select('lesson_part_id')
+      .eq('student_id', studentId)
+      .in('lesson_part_id', partIds),
   ])
 
-  if (slidesError || settingsError || practiceError) {
+  if (slidesError || settingsError || practiceError || synchronizedReadingsError) {
     throw new Error(
       slidesError?.message ??
         settingsError?.message ??
         practiceError?.message ??
+        synchronizedReadingsError?.message ??
         'שגיאה בטעינת נתוני WhatsApp.'
     )
   }
@@ -424,6 +435,10 @@ async function buildStudentWhatsAppCatalogSnapshot(
     )
   }
 
+  const synchronizedReadingPartIds = new Set(
+    ((synchronizedReadings ?? []) as Array<{ lesson_part_id: number }>).map((row) => row.lesson_part_id)
+  )
+
   const groupMetaById = new Map(
     lessonGroups.map((group) => {
       const section = Array.isArray(group.sections) ? group.sections[0] : group.sections
@@ -450,10 +465,6 @@ async function buildStudentWhatsAppCatalogSnapshot(
       }
 
       const mediaKind = getLessonMediaKind(part)
-      const selectedVariant = resolveLessonVideoVariant(part, {
-        studentPreferredVariant: student.preferred_video_variant ?? null,
-        partPreferredVariant: partSetting?.preferred_video_variant ?? null,
-      })
       const resolvedVideoUrl = getLessonMediaUrl(part, {
         studentPreferredVariant: student.preferred_video_variant ?? null,
         partPreferredVariant: partSetting?.preferred_video_variant ?? null,
@@ -464,6 +475,7 @@ async function buildStudentWhatsAppCatalogSnapshot(
         audioUrl: part.audio_url,
         videoUrl: mediaKind === 'video' ? resolvedVideoUrl : part.video_url,
         slideCount: slideCountByPartId.get(part.id) ?? 0,
+        hasSynchronizedReading: synchronizedReadingPartIds.has(part.id),
       })
     })
     .map((part) => {
@@ -985,11 +997,12 @@ export async function getStudentWhatsAppCatalogByPhoneWithSource(
     )
 
     if (cachedCatalog) {
+      const refreshed = await refreshCatalogIfMissingSynchronizedReadings(cachedCatalog)
       return {
-        student: cachedCatalog.student,
-        catalog: cachedCatalog,
+        student: refreshed.catalog.student,
+        catalog: refreshed.catalog,
         studentSource: 'cache',
-        catalogSource: 'cache',
+        catalogSource: refreshed.refreshed ? 'fallback' : 'cache',
       }
     }
   }
@@ -1020,6 +1033,78 @@ export async function getStudentWhatsAppCatalog(studentId: number) {
   return result.catalog
 }
 
+async function refreshCatalogIfMissingSynchronizedReadings(
+  catalog: StudentWhatsAppCatalog
+): Promise<{ catalog: StudentWhatsAppCatalog; refreshed: boolean }> {
+  // The catalog cache may have been built before timed readings were included.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = getSupabaseAdmin() as any
+  const { data: readingRows, error: readingsError } = await db
+    .from('student_lesson_part_readings')
+    .select('lesson_part_id')
+    .eq('student_id', catalog.student.id)
+
+  if (readingsError || !readingRows?.length) {
+    return { catalog, refreshed: false }
+  }
+
+  const cachedPartIds = new Set(catalog.parts.map((part) => part.lessonPartId))
+  const missingPartIds = [...new Set(
+    (readingRows as Array<{ lesson_part_id: number }>)
+      .map((row) => row.lesson_part_id)
+      .filter((partId) => !cachedPartIds.has(partId))
+  )]
+
+  if (missingPartIds.length === 0) {
+    return { catalog, refreshed: false }
+  }
+
+  const { data: parts, error: partsError } = await db
+    .from('lesson_parts')
+    .select('id, is_visible_to_student, lesson_groups!inner(teacher_parasha_id)')
+    .in('id', missingPartIds)
+  if (partsError || !parts?.length) {
+    return { catalog, refreshed: false }
+  }
+
+  const assignedVisibleIds = (parts as Array<{
+    id: number
+    is_visible_to_student: boolean | null
+    lesson_groups: { teacher_parasha_id: number | null } | Array<{ teacher_parasha_id: number | null }>
+  }>).filter((part) => {
+    const group = Array.isArray(part.lesson_groups) ? part.lesson_groups[0] : part.lesson_groups
+    return part.is_visible_to_student !== false &&
+      group?.teacher_parasha_id === catalog.activeTeacherParashaId
+  }).map((part) => part.id)
+
+  if (assignedVisibleIds.length === 0) {
+    return { catalog, refreshed: false }
+  }
+
+  const { data: settings, error: settingsError } = await db
+    .from('student_lesson_part_settings')
+    .select('lesson_part_id, is_visible_to_student')
+    .eq('student_id', catalog.student.id)
+    .in('lesson_part_id', assignedVisibleIds)
+  if (settingsError) {
+    return { catalog, refreshed: false }
+  }
+
+  const hiddenPartIds = new Set(
+    (settings ?? [])
+      .filter((setting: { is_visible_to_student: boolean }) => !setting.is_visible_to_student)
+      .map((setting: { lesson_part_id: number }) => setting.lesson_part_id)
+  )
+  if (assignedVisibleIds.every((partId) => hiddenPartIds.has(partId))) {
+    return { catalog, refreshed: false }
+  }
+
+  const refreshedCatalog = await refreshStudentWhatsAppCatalog(catalog.student.id)
+  return refreshedCatalog
+    ? { catalog: refreshedCatalog, refreshed: true }
+    : { catalog, refreshed: false }
+}
+
 export async function getStudentWhatsAppCatalogWithSource(
   studentId: number
 ): Promise<StudentWhatsAppCatalogResult> {
@@ -1030,9 +1115,10 @@ export async function getStudentWhatsAppCatalogWithSource(
       throw new Error('אין לתלמיד ספריית פרשה פעילה לשליחה.')
     }
 
+    const refreshed = await refreshCatalogIfMissingSynchronizedReadings(cachedCatalog)
     return {
-      catalog: cachedCatalog,
-      source: 'cache',
+      catalog: refreshed.catalog,
+      source: refreshed.refreshed ? 'fallback' : 'cache',
     }
   }
 
@@ -1373,6 +1459,7 @@ export async function getStudentWhatsAppProgressSummary(
     { data: settingRows, error: settingsError },
     { data: practiceRows, error: practiceError },
     { data: recordingRows, error: recordingError },
+    { data: synchronizedReadingRows, error: synchronizedReadingsError },
   ] = await Promise.all([
     supabaseAdmin
       .from('lesson_slides')
@@ -1393,14 +1480,20 @@ export async function getStudentWhatsAppProgressSummary(
       .select('lesson_part_id')
       .eq('student_id', studentId)
       .in('lesson_part_id', partIds),
+    supabaseAdmin
+      .from('student_lesson_part_readings')
+      .select('lesson_part_id')
+      .eq('student_id', studentId)
+      .in('lesson_part_id', partIds),
   ])
 
-  if (slidesError || settingsError || practiceError || recordingError) {
+  if (slidesError || settingsError || practiceError || recordingError || synchronizedReadingsError) {
     throw new Error(
       slidesError?.message ??
         settingsError?.message ??
         practiceError?.message ??
         recordingError?.message ??
+        synchronizedReadingsError?.message ??
         'שגיאה בטעינת סטטיסטיקת WhatsApp.'
     )
   }
@@ -1451,6 +1544,9 @@ export async function getStudentWhatsAppProgressSummary(
   const recordingsSet = new Set(
     ((recordingRows ?? []) as Array<{ lesson_part_id: number }>).map((row) => row.lesson_part_id)
   )
+  const synchronizedReadingPartIds = new Set(
+    ((synchronizedReadingRows ?? []) as Array<{ lesson_part_id: number }>).map((row) => row.lesson_part_id)
+  )
 
   const groupMetaById = new Map(
     lessonGroups.map((group) => {
@@ -1481,6 +1577,7 @@ export async function getStudentWhatsAppProgressSummary(
         audioUrl: part.audio_url,
         videoUrl: mediaKind === 'video' ? resolvedVideoUrl : part.video_url,
         slideCount: slideCountByPartId.get(part.id) ?? 0,
+        hasSynchronizedReading: synchronizedReadingPartIds.has(part.id),
       })
       const meta = groupMetaById.get(part.lesson_group_id)
 

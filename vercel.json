@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "daemons": {
+    "text-sync-worker": {
+      "root": ".",
+      "entrypoint": "Dockerfile.worker",
+      "instances": {
+        "iad1": 1
+      },
+      "terminationGracePeriodSeconds": 900
+    }
+  }
+}

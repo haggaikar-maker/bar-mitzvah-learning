@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAdminSession } from '@/lib/admin-auth'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { refreshStudentWhatsAppCatalog } from '@/lib/whatsapp-bot'
 
 export async function POST(request: Request, { params }: { params: Promise<{ jobId: string }> }) {
   try {
@@ -88,6 +89,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
         }).eq('id', sourceReading.id)
         return NextResponse.json({ error: updateJobError.message }, { status: 500 })
       }
+    }
+
+    if (job.student_id !== studentId) {
+      await Promise.all([
+        refreshStudentWhatsAppCatalog(job.student_id),
+        refreshStudentWhatsAppCatalog(studentId),
+      ])
+    } else if (job.lesson_part_id !== lessonPartId) {
+      await refreshStudentWhatsAppCatalog(studentId)
     }
 
     return NextResponse.json({ success: true })

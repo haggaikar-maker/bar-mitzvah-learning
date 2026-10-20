@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
-import { recordPracticeEvent, saveStudentRecording } from '../../actions'
+import { recordListeningProgress, recordPracticeEvent, saveStudentRecording } from '../../actions'
 import { getActiveSynchronizedTokenIndex, groupSynchronizedLayout, type SynchronizedToken } from '@/lib/synchronized-reading-layout'
 
 type TimedToken = SynchronizedToken
@@ -12,12 +12,18 @@ export default function SynchronizedReading({
   existingRecordingUrl,
   sourceRef,
   tokens,
+  completionTarget,
+  initialListenedSeconds,
+  initialCompletedSessions,
 }: {
   lessonPartId: number
   audioUrl: string
   existingRecordingUrl?: string | null
   sourceRef: string
   tokens: TimedToken[]
+  completionTarget: number
+  initialListenedSeconds: number
+  initialCompletedSessions: number
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const pendingSeekRef = useRef<{ audio: HTMLAudioElement; listener: () => void } | null>(null)
@@ -37,8 +43,11 @@ export default function SynchronizedReading({
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<number | null>(null)
   const hasStartedRef = useRef(false)
-  const hasCompletedRef = useRef(false)
-  const continuousPlaybackRef = useRef(false)
+  const listeningSessionIdRef = useRef<string | null>(null)
+  const listenedSecondsRef = useRef(0)
+  const listeningIntervalsRef = useRef<Array<{ start: number; end: number }>>([])
+  const lastSampleRef = useRef<{ position: number; at: number } | null>(null)
+  const lastProgressSaveAtRef = useRef(0)
   const [activeIndex, setActiveIndex] = useState(-1)
   const [playerMode, setPlayerMode] = useState<'native' | 'web-audio'>('web-audio')
   const [webAudioLoading, setWebAudioLoading] = useState(true)
@@ -51,6 +60,8 @@ export default function SynchronizedReading({
   const [highlight, setHighlight] = useState<'yellow' | 'inverse' | 'red' | 'red-large'>('yellow')
   const [error, setError] = useState('')
   const [audioDuration, setAudioDuration] = useState(0)
+  const [listenedSeconds, setListenedSeconds] = useState(initialListenedSeconds)
+  const [completedSessions, setCompletedSessions] = useState(initialCompletedSessions)
   const [recording, setRecording] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
   const [recordingFile, setRecordingFile] = useState<File | null>(null)
@@ -72,6 +83,48 @@ export default function SynchronizedReading({
     return Math.min(buffer.duration, webAudioPositionRef.current + Math.max(0, context.currentTime - webAudioStartedAtRef.current))
   }
 
+  async function flushListeningProgress(duration = audioDuration) {
+    const sessionId = listeningSessionIdRef.current
+    if (!sessionId || duration <= 0 || listenedSecondsRef.current <= 0) return
+    lastProgressSaveAtRef.current = Date.now()
+    try {
+      const result = await recordListeningProgress({
+        sessionId,
+        lessonPartId,
+        durationSeconds: duration,
+        listenedSeconds: Math.floor(listenedSecondsRef.current),
+        intervals: listeningIntervalsRef.current,
+      })
+      setListenedSeconds(result.listenedSeconds)
+      setCompletedSessions(result.completedSessions)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'לא הצלחנו לשמור את זמן ההאזנה.')
+    }
+  }
+
+  function trackListeningPosition(position: number, isPlaying = webAudioPlayingRef.current) {
+    if (!isPlaying) return
+    const now = performance.now()
+    const previous = lastSampleRef.current
+    if (previous) {
+      const mediaDelta = position - previous.position
+      if (mediaDelta > 0 && mediaDelta <= 0.3) {
+        listenedSecondsRef.current += mediaDelta
+        const last = listeningIntervalsRef.current.at(-1)
+        if (last && previous.position <= last.end + 0.15) last.end = Math.max(last.end, position)
+        else listeningIntervalsRef.current.push({ start: previous.position, end: position })
+      }
+    }
+    lastSampleRef.current = { position, at: now }
+    if (!listeningSessionIdRef.current) listeningSessionIdRef.current = crypto.randomUUID()
+    if (Date.now() - lastProgressSaveAtRef.current >= 10000) void flushListeningProgress()
+  }
+
+  const flushProgressEvent = useEffectEvent((duration?: number) => flushListeningProgress(duration))
+  const trackPositionEvent = useEffectEvent((position: number, isPlaying?: boolean) =>
+    trackListeningPosition(position, isPlaying)
+  )
+
   function stopWebAudioSource() {
     const source = audioSourceRef.current
     if (!source) return
@@ -89,7 +142,8 @@ export default function SynchronizedReading({
     stopWebAudioSource()
     setWebAudioPlaying(false)
     setWebAudioTime(position)
-    continuousPlaybackRef.current = false
+    lastSampleRef.current = null
+    void flushListeningProgress()
   }
 
   async function playWebAudioAt(position: number) {
@@ -107,6 +161,7 @@ export default function SynchronizedReading({
       webAudioPositionRef.current = offset
       webAudioStartedAtRef.current = context.currentTime
       webAudioPlayingRef.current = true
+      lastSampleRef.current = null
       audioSourceRef.current = source
       source.onended = () => {
         if (audioSourceRef.current !== source) return
@@ -114,6 +169,7 @@ export default function SynchronizedReading({
         audioSourceRef.current = null
         webAudioPositionRef.current = buffer.duration
         webAudioPlayingRef.current = false
+        lastSampleRef.current = null
         setWebAudioPlaying(false)
         setWebAudioTime(buffer.duration)
         void handleEnded()
@@ -229,13 +285,14 @@ export default function SynchronizedReading({
     let frame = 0
     const sync = () => {
       const time = audio.currentTime
+      trackPositionEvent(time, !audio.paused && !audio.ended)
       // During gaps or silence, hold the most recently started word instead of flashing blank.
       const index = getActiveSynchronizedTokenIndex(tokens, time)
       setActiveIndex((current) => current === index ? current : index)
     }
     const tick = () => { sync(); if (!audio.paused && !audio.ended) frame = requestAnimationFrame(tick) }
     const play = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(tick) }
-    const stop = () => { cancelAnimationFrame(frame); sync() }
+    const stop = () => { cancelAnimationFrame(frame); sync(); lastSampleRef.current = null; void flushProgressEvent() }
     audio.addEventListener('play', play)
     audio.addEventListener('pause', stop)
     audio.addEventListener('ended', stop)
@@ -256,6 +313,7 @@ export default function SynchronizedReading({
     let lastDisplayedTime = webAudioPositionRef.current
     const tick = () => {
       const time = getWebAudioCurrentTime()
+      trackPositionEvent(time)
       const index = getActiveSynchronizedTokenIndex(tokens, time)
       setActiveIndex((current) => current === index ? current : index)
       if (time - lastDisplayedTime >= 0.1) {
@@ -267,6 +325,12 @@ export default function SynchronizedReading({
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
   }, [playerMode, tokens, webAudioPlaying])
+
+  useEffect(() => {
+    if (!webAudioPlaying || audioDuration <= 0) return
+    const timer = window.setInterval(() => void flushProgressEvent(), 10000)
+    return () => window.clearInterval(timer)
+  }, [webAudioPlaying, audioDuration])
 
   useEffect(() => {
     const viewport = scrollRef.current
@@ -313,22 +377,20 @@ export default function SynchronizedReading({
   }
 
   async function handlePlay(playbackPosition?: number) {
-    const audio = audioRef.current
     if (!hasStartedRef.current) {
       hasStartedRef.current = true
-      continuousPlaybackRef.current = (playbackPosition ?? audio?.currentTime ?? 0) <= 0.75
+      listeningSessionIdRef.current = crypto.randomUUID()
+      listenedSecondsRef.current = 0
+      listeningIntervalsRef.current = []
+      lastSampleRef.current = null
       try { await recordPracticeEvent({ lessonPartId, completed: false }) }
       catch (cause) { setError(cause instanceof Error ? cause.message : 'לא הצלחנו לעדכן את המעקב.') }
-    } else if (audio && audio.currentTime > 0.75) {
-      continuousPlaybackRef.current = false
     }
+    void playbackPosition
   }
 
   async function handleEnded() {
-    if (hasCompletedRef.current || !continuousPlaybackRef.current) return
-    hasCompletedRef.current = true
-    try { await recordPracticeEvent({ lessonPartId, completed: true }) }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'לא הצלחנו לשמור השלמה.') }
+    await flushListeningProgress()
   }
 
   async function startRecording() {
@@ -399,7 +461,6 @@ export default function SynchronizedReading({
   function renderToken(token: TimedToken, index: number) {
     return <button key={`${token.index}-${token.text}`} ref={(element) => { if (element) tokenRefs.current.set(token.index, element); else tokenRefs.current.delete(token.index) }} className={`mx-0 inline rounded-lg px-0.5 transition sm:mx-0.5 sm:px-1 ${index === activeIndex ? `sync-active-${highlight}` : ''}`} onClick={() => {
       if (playerMode === 'web-audio') {
-        continuousPlaybackRef.current = false
         setActiveIndex(index)
         void playWebAudioAt(token.start)
         return
@@ -459,7 +520,7 @@ export default function SynchronizedReading({
           <select aria-label="סגנון הדגשת מילה" className="rounded-full bg-slate-100 px-3 py-2" value={highlight} onChange={(event) => setHighlight(event.target.value as typeof highlight)}><option value="yellow">צהוב</option><option value="inverse">שחור ולבן</option><option value="red">אדום</option><option value="red-large">אדום מוגדל</option></select>
         </div>
       </div>
-      <audio className={`mt-4 w-full ${playerMode === 'native' ? '' : 'hidden'}`} controls onDurationChange={(event) => setAudioDuration(event.currentTarget.duration || 0)} onLoadedMetadata={(event) => setAudioDuration(event.currentTarget.duration || 0)} onEnded={() => void handleEnded()} onPause={(event) => { if (!event.currentTarget.ended) continuousPlaybackRef.current = false }} onPlay={() => void handlePlay()} onSeeking={(event) => { if (event.currentTarget.currentTime > 1) continuousPlaybackRef.current = false }} ref={audioRef} src={audioUrl} />
+      <audio className={`mt-4 w-full ${playerMode === 'native' ? '' : 'hidden'}`} controls onDurationChange={(event) => setAudioDuration(event.currentTarget.duration || 0)} onLoadedMetadata={(event) => setAudioDuration(event.currentTarget.duration || 0)} onEnded={() => void handleEnded()} onPlay={() => void handlePlay()} ref={audioRef} src={audioUrl} />
       {playerMode === 'web-audio' && <div className="mt-4 rounded-2xl bg-slate-100 p-4" dir="ltr">
         <div className="flex flex-wrap items-center gap-3" dir="rtl">
           <button aria-label={webAudioPlaying ? 'השהיית הנגן' : 'הפעלת הנגן'} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white" disabled={!webAudioReady} onClick={() => webAudioPlaying ? pauseWebAudio() : void playWebAudioAt(webAudioPositionRef.current)} type="button">{webAudioPlaying ? 'השהיה' : 'הפעלה'}</button>
@@ -477,6 +538,14 @@ export default function SynchronizedReading({
         {playerMode === 'native' && <span className="text-xs text-slate-600">מנגן באמצעות נגן הדפדפן הרגיל.</span>}
         {webAudioLoading && <span aria-live="polite" className="text-xs text-slate-600">טעינת ההקלטה המלאה למכשיר עשויה לקחת מעט זמן.</span>}
       </div>
+      {audioDuration > 0 && <div className="mt-3 rounded-2xl bg-cyan-50 p-3 text-sm ring-1 ring-cyan-100">
+        <div className="flex flex-wrap justify-between gap-2 font-bold text-slate-800">
+          <span>יעד האזנה: {formatTime(audioDuration * completionTarget)} ({completionTarget} חזרות)</span>
+          <span>{Math.min(100, Math.round((listenedSeconds / Math.max(audioDuration * completionTarget, 1)) * 100))}% · {formatTime(listenedSeconds)} / {formatTime(audioDuration * completionTarget)}</span>
+        </div>
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-cyan-100"><div className="h-full rounded-full bg-cyan-700 transition-[width]" style={{ width: `${Math.min(100, (listenedSeconds / Math.max(audioDuration * completionTarget, 1)) * 100)}%` }} /></div>
+        <p className="mt-2 text-xs text-slate-600">השלמות של סשן מלא ({'≥'}80% מהקטע): {completedSessions}/{completionTarget}</p>
+      </div>}
       <div className="sticky top-0 z-10 mt-3 flex flex-wrap items-center gap-2 rounded-2xl bg-white/95 py-2 backdrop-blur">
         {!recording ? <button className="rounded-xl bg-[var(--student-orange)] px-4 py-3 text-sm font-bold text-white" onClick={() => void startRecording()} type="button">הקלטת התלמיד</button> : <button className="rounded-xl bg-rose-700 px-4 py-3 text-sm font-bold text-white" onClick={() => recorderRef.current?.stop()} type="button">עצירת הקלטה · {Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, '0')}</button>}
         {recordingFile && <button className="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white disabled:opacity-50" disabled={savingRecording} onClick={() => void saveRecording()} type="button">{savingRecording ? 'שומר...' : 'שמירת הקלטה'}</button>}

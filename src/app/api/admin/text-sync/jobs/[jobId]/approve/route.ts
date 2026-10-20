@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAdminSession } from '@/lib/admin-auth'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { refreshStudentWhatsAppCatalog } from '@/lib/whatsapp-bot'
 
 type TimedToken = { index: number; text: string; start: number; end: number; confidence?: number; source?: string; [key: string]: unknown }
 type AlignmentResult = { ref?: string; text?: string; durationSeconds?: number; tokens?: TimedToken[] }
@@ -81,6 +82,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
 
     const { error: updateError } = await db.from('text_sync_jobs').update({ status: 'approved', updated_at: new Date().toISOString() }).eq('id', jobId)
     if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 })
+    await refreshStudentWhatsAppCatalog(job.student_id)
     return NextResponse.json({ success: true })
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'שמירת הקריאה נכשלה.' }, { status: 500 })

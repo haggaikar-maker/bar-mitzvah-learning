@@ -4,7 +4,7 @@ import json
 import sys
 from pathlib import Path
 
-from text_sync_worker import PARASHA_ORDER, get_aliyah_refs, ref_to_text
+from text_sync_worker import PARASHA_ORDER, get_aliyah_refs, get_maftir_refs, ref_to_text
 
 
 def main() -> None:
@@ -23,9 +23,18 @@ def main() -> None:
         }
         for parasha in PARASHA_ORDER
     }
+    maftir_ranges = {
+        parasha: {
+            "start": ref_to_text(start),
+            "end": ref_to_text(end),
+        }
+        for parasha in PARASHA_ORDER
+        for start, end in [get_maftir_refs(text2video_path / "tikkun_data", parasha)]
+    }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
-        "export const torahAliyahRanges = " + json.dumps(ranges, ensure_ascii=False, indent=2) + " as const\n",
+        "export const torahAliyahRanges = " + json.dumps(ranges, ensure_ascii=False, indent=2) + " as const\n\n"
+        + "export const torahMaftirRanges = " + json.dumps(maftir_ranges, ensure_ascii=False, indent=2) + " as const\n",
         encoding="utf-8",
     )
 

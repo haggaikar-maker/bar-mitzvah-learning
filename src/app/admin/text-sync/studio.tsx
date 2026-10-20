@@ -9,7 +9,7 @@ type Section = { id: number; name: string; orderIndex: number; parts: Part[] }
 type Library = { id: number; ownerAdminId: number; ownerDisplayName: string; parashaName: string; sections: Section[]; students: Array<{ id: number; name: string }> }
 type Token = SynchronizedToken
 type Passage = { title: string; book: string; sourceRef: string; startChapter: number; startVerse: number; endChapter: number; endVerse: number; text: string; verses: Array<{ ref: string; text: string }>; layoutTokens?: Token[] | null }
-type Job = { id: string; status: string; progress_percent: number; student_id?: number; lesson_part_id?: number; audio_public_url?: string; parasha_name?: string; aliyah_number?: number; reading_title?: string; created_at?: string; assignment?: { studentId: number; studentName: string; teacherParashaId: number | null; teacherName: string; libraryName: string; parashaName: string; sectionName: string; partName: string }; result_json?: { ref?: string; text?: string; durationSeconds?: number; layoutKind?: string; pages?: number[]; tokens?: Token[] } | null; error_message?: string | null }
+type Job = { id: string; status: string; progress_percent: number; student_id?: number; lesson_part_id?: number; audio_public_url?: string; parasha_name?: string; aliyah_number?: number; reading_title?: string; created_at?: string; assignment?: { studentId: number; studentName: string; teacherParashaId: number | null; teacherName: string; libraryName: string; parashaName: string; sectionName: string; partName: string }; result_json?: { ref?: string; text?: string; durationSeconds?: number; layoutKind?: string; pages?: number[]; timingDiagnostics?: { workerId?: string; audioSha256?: string; audioBytes?: number; whisperModel?: string; leadingSilenceSeconds?: number; silenceThresholdDb?: number; leadingSilenceCorrectionApplied?: boolean; pythonVersion?: string }; tokens?: Token[] } | null; error_message?: string | null }
 
 const manualBooks = ['בראשית', 'שמות', 'ויקרא', 'במדבר', 'דברים', 'יהושע', 'שופטים', 'שמואל_א', 'שמואל_ב', 'מלכים_א', 'מלכים_ב', 'ישעיהו', 'ירמיהו', 'יחזקאל', 'הושע', 'יואל', 'עמוס', 'עובדיה', 'יונה', 'מיכה', 'נחום', 'חבקוק', 'צפניה', 'חגי', 'זכריה', 'מלאכי', 'תהילים', 'משלי', 'איוב', 'שיר_השירים', 'רות', 'איכה', 'קהלת', 'אסתר', 'דניאל', 'עזרא', 'נחמיה', 'דברי_הימים_א', 'דברי_הימים_ב']
 
@@ -92,7 +92,7 @@ export default function TextSyncStudio({ libraries }: { libraries: Library[] }) 
   const section = library?.sections.find((item) => item.id === sectionId)
   const [partId, setPartId] = useState(section?.parts[0]?.id ?? 0)
   const [aliyah, setAliyah] = useState(Math.min(7, Math.max(1, (section?.orderIndex ?? 0) + 1)))
-  const [readingKind, setReadingKind] = useState<'weekly_aliyah' | 'manual_range'>('weekly_aliyah')
+  const [readingKind, setReadingKind] = useState<'weekly_aliyah' | 'maftir' | 'manual_range'>('weekly_aliyah')
   const [readingTitle, setReadingTitle] = useState('')
   const [manualBook, setManualBook] = useState('ישעיהו')
   const [startChapter, setStartChapter] = useState(40)
@@ -132,11 +132,14 @@ export default function TextSyncStudio({ libraries }: { libraries: Library[] }) 
   }, [section])
   useEffect(() => {
     let cancelled = false
-    const query = new URLSearchParams({ mode: readingKind === 'weekly_aliyah' ? 'weekly' : 'manual' })
+    const query = new URLSearchParams({ mode: readingKind === 'weekly_aliyah' ? 'weekly' : readingKind === 'maftir' ? 'maftir' : 'manual' })
     if (readingKind === 'weekly_aliyah') {
       if (!library?.parashaName || !aliyah) return
       query.set('parasha', library.parashaName)
       query.set('aliyah', String(aliyah))
+    } else if (readingKind === 'maftir') {
+      if (!library?.parashaName) return
+      query.set('parasha', library.parashaName)
     } else {
       if (![startChapter, startVerse, endChapter, endVerse].every((value) => Number.isInteger(value) && value > 0)) return
       query.set('book', manualBook)
@@ -273,7 +276,7 @@ export default function TextSyncStudio({ libraries }: { libraries: Library[] }) 
         body: JSON.stringify({
           lessonPartId: partId, studentId,
           aliyahNumber: readingKind === 'weekly_aliyah' ? aliyah : null,
-          readingKind,
+          readingKind: readingKind === 'weekly_aliyah' ? 'weekly_aliyah' : 'manual_range',
           readingTitle: readingKind === 'manual_range' ? (readingTitle.trim() || passage.title) : passage.title,
           sourceBook: passage.book,
           startChapter: passage.startChapter, startVerse: passage.startVerse,
@@ -373,8 +376,8 @@ export default function TextSyncStudio({ libraries }: { libraries: Library[] }) 
         <div className="grid gap-4">
         <label className="grid gap-2 text-sm font-bold">ספריית פרשה<select className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3" value={library?.id ?? ''} onChange={(event) => setLibraryId(Number(event.target.value))}>{availableLibraries.map((item) => <option key={item.id} value={item.id}>{item.ownerDisplayName ? `${item.ownerDisplayName} · ` : ''}{item.parashaName}</option>)}</select></label>
         <label className="grid gap-2 text-sm font-bold">תלמיד<select className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3" value={studentId || ''} onChange={(event) => setStudentId(Number(event.target.value))}>{library?.students.map((student) => <option key={student.id} value={student.id}>{student.name}</option>)}</select></label>
-        <fieldset className="grid gap-2 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200"><legend className="px-2 text-sm font-bold">מקור הקריאה</legend><div className="flex flex-wrap gap-3 text-sm"><label className="flex items-center gap-2"><input checked={readingKind === 'weekly_aliyah'} name="reading-kind" onChange={() => setReadingKind('weekly_aliyah')} type="radio" /> עלייה בפרשת השבוע</label><label className="flex items-center gap-2"><input checked={readingKind === 'manual_range'} name="reading-kind" onChange={() => setReadingKind('manual_range')} type="radio" /> טווח ידני, למשל הפטרה</label></div>
-          {readingKind === 'weekly_aliyah' ? <label className="grid gap-2 text-sm font-bold">עלייה<select className="rounded-xl border border-slate-200 bg-white px-4 py-3" value={aliyah} onChange={(event) => setAliyah(Number(event.target.value))}>{['ראשון','שני','שלישי','רביעי','חמישי','שישי','שביעי'].map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></label> : <>
+        <fieldset className="grid gap-2 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200"><legend className="px-2 text-sm font-bold">מקור הקריאה</legend><div className="flex flex-wrap gap-3 text-sm"><label className="flex items-center gap-2"><input checked={readingKind === 'weekly_aliyah'} name="reading-kind" onChange={() => setReadingKind('weekly_aliyah')} type="radio" /> עלייה בפרשת השבוע</label><label className="flex items-center gap-2"><input checked={readingKind === 'maftir'} name="reading-kind" onChange={() => setReadingKind('maftir')} type="radio" /> מפטיר בפרשה</label><label className="flex items-center gap-2"><input checked={readingKind === 'manual_range'} name="reading-kind" onChange={() => setReadingKind('manual_range')} type="radio" /> טווח ידני, למשל הפטרה</label></div>
+          {readingKind === 'weekly_aliyah' ? <label className="grid gap-2 text-sm font-bold">עלייה<select className="rounded-xl border border-slate-200 bg-white px-4 py-3" value={aliyah} onChange={(event) => setAliyah(Number(event.target.value))}>{['ראשון','שני','שלישי','רביעי','חמישי','שישי','שביעי'].map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></label> : readingKind === 'maftir' ? <p className="rounded-xl bg-white p-3 text-sm leading-6 text-slate-600">טווח המפטיר ייטען אוטומטית מתוך נתוני Tikkun. הקריאה נשמרת בנפרד, ובמקביל נכללת בסוף עלייה שביעי.</p> : <>
             <label className="grid gap-2 text-sm font-bold">שם הקריאה / ההפטרה<input className="rounded-xl border border-slate-200 bg-white px-4 py-3" onChange={(event) => setReadingTitle(event.target.value)} placeholder="למשל: הפטרת נח" value={readingTitle} /></label>
             <label className="grid gap-2 text-sm font-bold">ספר<select className="rounded-xl border border-slate-200 bg-white px-4 py-3" onChange={(event) => setManualBook(event.target.value)} value={manualBook}>{manualBooks.map((book) => <option key={book} value={book}>{book.replaceAll('_', ' ')}</option>)}</select></label>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{([['פרק התחלה', startChapter, setStartChapter], ['פסוק התחלה', startVerse, setStartVerse], ['פרק סיום', endChapter, setEndChapter], ['פסוק סיום', endVerse, setEndVerse]] as const).map(([label, value, setter]) => <label className="grid gap-2 text-xs font-bold" key={label}>{label}<input className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-3" min={1} onChange={(event) => setter(Number(event.target.value))} type="number" value={value} /></label>)}</div>
@@ -412,6 +415,17 @@ export default function TextSyncStudio({ libraries }: { libraries: Library[] }) 
         </> : <p className="text-sm text-slate-500">בחר קריאה כדי לראות את הטקסט לפני ההקלטה.</p>}</div>
       </div> : <>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 p-3 text-sm"><strong dir="ltr">{job.result_json?.ref}</strong><span>{displayedTokens.length} מילים · {estimated} זמנים משוערים</span></div>
+        {job.result_json?.timingDiagnostics && <details className="mb-4 rounded-xl bg-cyan-50 p-3 text-xs ring-1 ring-cyan-100">
+          <summary className="cursor-pointer font-bold">אבחון תזמון · {job.result_json.timingDiagnostics.workerId ?? 'worker לא ידוע'} · שקט התחלתי {job.result_json.timingDiagnostics.leadingSilenceSeconds?.toFixed(3) ?? '—'} שנ׳</summary>
+          <dl className="mt-2 grid gap-1 text-slate-700 sm:grid-cols-[auto_1fr]">
+            <dt>SHA-256 של קובץ האודיו</dt><dd className="break-all font-mono" dir="ltr">{job.result_json.timingDiagnostics.audioSha256 ?? '—'}</dd>
+            <dt>גודל הקובץ</dt><dd dir="ltr">{job.result_json.timingDiagnostics.audioBytes ?? '—'} bytes</dd>
+            <dt>תיקון שקט הוחל</dt><dd>{job.result_json.timingDiagnostics.leadingSilenceCorrectionApplied ? 'כן' : 'לא'}</dd>
+            <dt>סף זיהוי שקט</dt><dd dir="ltr">{job.result_json.timingDiagnostics.silenceThresholdDb ?? '—'} dB</dd>
+            <dt>מודל Whisper</dt><dd dir="ltr">{job.result_json.timingDiagnostics.whisperModel ?? '—'}</dd>
+            <dt>גרסת Python</dt><dd dir="ltr">{job.result_json.timingDiagnostics.pythonVersion ?? '—'}</dd>
+          </dl>
+        </details>}
         <audio className="mb-4 w-full" controls ref={audioRef} src={audioUrl} />
         <div className="mb-4 flex flex-wrap gap-2 text-sm"><label className="rounded-full bg-slate-100 px-3 py-2"><input checked={showNiqqud} onChange={(event) => setShowNiqqud(event.target.checked)} type="checkbox" /> ניקוד</label><label className="rounded-full bg-slate-100 px-3 py-2"><input checked={showCantillation} onChange={(event) => setShowCantillation(event.target.checked)} type="checkbox" /> טעמים</label><select aria-label="סגנון הדגשה" className="rounded-full bg-slate-100 px-3 py-2" value={highlight} onChange={(event) => setHighlight(event.target.value as typeof highlight)}><option value="yellow">רקע צהוב</option><option value="inverse">שחור ולבן</option><option value="red">אדום רגיל</option><option value="red-large">אדום מוגדל</option></select></div>
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl bg-cyan-50 p-3 text-sm ring-1 ring-cyan-100">

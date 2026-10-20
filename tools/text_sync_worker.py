@@ -1,9 +1,12 @@
 """Background word-alignment worker backed by the existing Text2Video Whisper code."""
 
 import argparse
+import hashlib
 import json
 import os
+import platform
 import re
+import signal
 import sys
 import tempfile
 import time
@@ -86,15 +89,48 @@ def get_aliyah_refs(data_path: Path, parasha_name: str, aliyah_number: int):
         raise ValueError(f"לא נמצאה עלייה {aliyah_number} לפרשת {parasha_name}.")
 
     start_ref = selected_markers[selected][1]
-    next_start = selected_markers[selected + 1][1] if selected + 1 < len(selected_markers) else (
-        markers[portion_end][1] if portion_end < len(markers) else verses[-1]
-    )
+    if aliyah_number == 7:
+        # The final weekly aliyah includes the Maftir passage. Marker 8 is
+        # useful for exposing Maftir separately, but must not truncate aliyah 7.
+        next_start = markers[portion_end][1] if portion_end < len(markers) else None
+    else:
+        next_start = selected_markers[selected + 1][1] if selected + 1 < len(selected_markers) else (
+            markers[portion_end][1] if portion_end < len(markers) else None
+        )
     start_index = verses.index(start_ref)
-    next_index = verses.index(next_start)
-    end_ref = verses[max(start_index, next_index - 1)]
+    end_index = verses.index(next_start) - 1 if next_start else len(verses) - 1
+    end_ref = verses[max(start_index, end_index)]
     if end_ref[0] not in BOOK_NAMES:
         raise ValueError("העלייה שנבחרה אינה נמצאת בחומש.")
     return start_ref, end_ref
+
+
+def get_maftir_refs(data_path: Path, parasha_name: str):
+    names = {normalize_hebrew_name(name): index for index, name in enumerate(PARASHA_ORDER)}
+    parasha_index = names.get(normalize_hebrew_name(parasha_name))
+    if parasha_index is None:
+        raise ValueError(f"לא נמצאה התאמה לפרשה '{parasha_name}' בנתוני העליות.")
+
+    verses, markers = load_torah_index(str(data_path.resolve()))
+    start_markers = [i for i, marker in enumerate(markers) if marker[0] == 1]
+    portion_start = start_markers[parasha_index]
+    portion_end = start_markers[parasha_index + 1] if parasha_index + 1 < len(start_markers) else len(markers)
+    selected_markers = markers[portion_start:portion_end]
+    maftir_marker = next((marker for marker in selected_markers if marker[0] == 8), None)
+
+    if portion_end < len(markers):
+        end_index = verses.index(markers[portion_end][1]) - 1
+    else:
+        end_index = len(verses) - 1
+    if maftir_marker:
+        start_index = verses.index(maftir_marker[1])
+    else:
+        # Some terminal portions have no explicit marker 8; use their final
+        # three verses as the traditional Maftir repeat.
+        start_index = max(verses.index(selected_markers[-1][1]), end_index - 2)
+    if start_index > end_index:
+        raise ValueError(f"לא נמצא טווח מפטיר תקין לפרשת {parasha_name}.")
+    return verses[start_index], verses[end_index]
 
 
 def ref_to_text(ref):
@@ -108,6 +144,14 @@ def worker_request_headers(secret: str) -> dict[str, str]:
     if vercel_bypass:
         headers["x-vercel-protection-bypass"] = vercel_bypass
     return headers
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as audio_file:
+        for chunk in iter(lambda: audio_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def update_job(site_url: str, secret: str, job_id: str, **payload: Any):
@@ -458,12 +502,28 @@ def process_job(site_url: str, secret: str, job: dict[str, Any], text2video_path
                         audio_file.write(chunk)
 
         update_job(site_url, secret, job_id, status="processing", progressPercent=30)
+        audio_sha256 = sha256_file(audio_path)
+        whisper_model = os.environ.get("TEXT_SYNC_WHISPER_MODEL", "small")
+        silence_threshold_db = -40
         transcript = transcribe_audio(
             str(audio_path),
             language="he",
-            model_name=os.environ.get("TEXT_SYNC_WHISPER_MODEL", "small"),
+            model_name=whisper_model,
+            shift_leading_silence=False,
+            silence_thresh=silence_threshold_db,
             progress_callback=None,
         )
+        timing_diagnostics = {
+            "workerId": os.environ.get("TEXT_SYNC_WORKER_ID") or ("vercel-daemon" if os.environ.get("VERCEL") else "local"),
+            "audioSha256": audio_sha256,
+            "audioBytes": audio_path.stat().st_size,
+            "whisperModel": whisper_model,
+            "leadingSilenceSeconds": round(float(transcript.get("leading_silence_seconds", 0.0)), 3),
+            "silenceThresholdDb": silence_threshold_db,
+            "leadingSilenceCorrectionApplied": bool(transcript.get("leading_silence_correction_applied", False)),
+            "pythonVersion": platform.python_version(),
+        }
+        print(f"Text sync timing diagnostics: {json.dumps(timing_diagnostics, ensure_ascii=False, sort_keys=True)}", flush=True)
         timed_words = extract_timed_words(transcript)
         if not timed_words:
             raise ValueError("Whisper לא זיהה מילים בהקלטה.")
@@ -497,6 +557,7 @@ def process_job(site_url: str, secret: str, job: dict[str, Any], text2video_path
             "alignmentMethod": f"Text2Video Whisper + {layout_kind} layout + sequence alignment",
             "layoutKind": layout_kind,
             "pages": sorted({item["page"] for item in semantic_layout}) if semantic_layout else [],
+            "timingDiagnostics": timing_diagnostics,
             "tokens": tokens,
         }
         update_job(site_url, secret, job_id, status="completed", progressPercent=100, result=result, sourceRef=ref)
@@ -504,18 +565,48 @@ def process_job(site_url: str, secret: str, job: dict[str, Any], text2video_path
 
 def main():
     parser = argparse.ArgumentParser(description="Process queued Torah reading alignment jobs using Text2Video Whisper.")
-    parser.add_argument("--site-url", required=True, help="Main site's base URL, for example http://localhost:3000")
-    parser.add_argument("--worker-secret", required=True, help="Must match TEXT_SYNC_WORKER_SECRET in the site environment")
-    parser.add_argument("--text2video-path", default=r"C:\Tora\Text2Video", help="Existing Text2Video folder containing sync_core.py and tikkun_data")
+    parser.add_argument("--site-url", default=os.environ.get("TEXT_SYNC_SITE_URL"), help="Main site's base URL; may also be set with TEXT_SYNC_SITE_URL")
+    parser.add_argument("--worker-secret", default=os.environ.get("TEXT_SYNC_WORKER_SECRET"), help="Must match TEXT_SYNC_WORKER_SECRET in the site environment")
+    parser.add_argument(
+        "--text2video-path",
+        type=Path,
+        default=Path(__file__).resolve().parent / "text-sync-runtime",
+        help="Worker runtime directory (defaults to the packaged runtime in this project)",
+    )
     parser.add_argument("--poll-seconds", type=float, default=5)
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
+    if not args.site_url:
+        parser.error("--site-url or TEXT_SYNC_SITE_URL is required")
+    if not args.worker_secret:
+        parser.error("--worker-secret or TEXT_SYNC_WORKER_SECRET is required")
     site_url = args.site_url.rstrip("/")
-    text2video_path = Path(args.text2video_path)
-    if not (text2video_path / "sync_core.py").exists():
-        raise SystemExit(f"Text2Video sources not found under {text2video_path}")
+    text2video_path = args.text2video_path
+    required_runtime_files = (
+        "sync_core.py",
+        "torah_builder.py",
+        "builder_pipeline.py",
+        "StamAshkenazCLM.ttf",
+        "tikkun_data/tables-of-contents/torah.json",
+    )
+    missing_runtime_files = [name for name in required_runtime_files if not (text2video_path / name).is_file()]
+    if missing_runtime_files:
+        raise SystemExit(
+            f"Worker runtime is incomplete under {text2video_path}: " + ", ".join(missing_runtime_files)
+        )
 
-    while True:
+    shutdown_requested = False
+
+    def request_shutdown(signum, _frame):
+        nonlocal shutdown_requested
+        if not shutdown_requested:
+            print(f"Received signal {signum}; finishing the current job before exiting.", flush=True)
+            shutdown_requested = True
+
+    signal.signal(signal.SIGTERM, request_shutdown)
+    print(f"Text sync worker started; polling {site_url}.", flush=True)
+
+    while not shutdown_requested:
         try:
             response = requests.post(
                 f"{site_url}/api/text-sync-worker/claim",
@@ -531,6 +622,7 @@ def main():
                 continue
             try:
                 process_job(site_url, args.worker_secret, job, text2video_path)
+                print(f"Job {job.get('id')} completed.", flush=True)
             except Exception as error:
                 print(f"Job {job.get('id')} failed: {error}", flush=True)
                 try:

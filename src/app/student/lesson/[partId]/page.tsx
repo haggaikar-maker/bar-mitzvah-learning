@@ -108,12 +108,25 @@ export default async function LessonPage({
 
   // This per-student table is introduced by the text-sync migration.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: synchronizedReading } = await (getSupabaseAdmin() as any)
+  const textSyncDb = getSupabaseAdmin() as any
+  const { data: synchronizedReading } = await textSyncDb
     .from('student_lesson_part_readings')
     .select('audio_url, source_ref, source_text, word_timings')
     .eq('student_id', session.id)
     .eq('lesson_part_id', lessonPart.id)
     .maybeSingle()
+  const { data: listeningRows } = await textSyncDb
+    .from('student_listening_sessions')
+    .select('listened_seconds, completed')
+    .eq('student_id', session.id)
+    .eq('lesson_part_id', lessonPart.id)
+  const initialListenedSeconds = ((listeningRows ?? []) as Array<{ listened_seconds: number }>).reduce(
+    (sum, row) => sum + (row.listened_seconds ?? 0),
+    0
+  )
+  const initialCompletedSessions = ((listeningRows ?? []) as Array<{ completed: boolean }>).filter(
+    (row) => row.completed
+  ).length
 
   const mediaKind = getLessonMediaKind(lessonPart)
   const hasNativeMedia = isLessonPartReady(lessonPart, new Map([[lessonPart.id, slides.length]]), lessonPart.id)
@@ -220,6 +233,9 @@ export default async function LessonPage({
               lessonPartId={lessonPart.id}
               sourceRef={synchronizedReading.source_ref}
               tokens={synchronizedReading.word_timings}
+              completionTarget={lessonPart.completion_target ?? 3}
+              initialListenedSeconds={initialListenedSeconds}
+              initialCompletedSessions={initialCompletedSessions}
             />
           ) : null}
           {hasNativeMedia ? (
@@ -235,6 +251,9 @@ export default async function LessonPage({
                 studentRecording={studentRecording}
                 lessonPartId={lessonPart.id}
                 showStudentRecording={!synchronizedReading}
+                completionTarget={lessonPart.completion_target ?? 3}
+                initialListenedSeconds={initialListenedSeconds}
+                initialCompletedSessions={initialCompletedSessions}
               />
             </div>
           ) : (

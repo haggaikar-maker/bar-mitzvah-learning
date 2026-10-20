@@ -3,6 +3,8 @@ import { logoutUser } from '../auth-actions'
 import {
   getStudentDashboardData,
 } from '@/lib/practice-data'
+import { collectServerPerformance, measureServerPerformance } from '@/lib/server-performance'
+import { PerformanceDiagnostics } from '../../components/performance-diagnostics'
 import { getReadingCountdownLabel } from '@/lib/student-schedule'
 import { requireStudentSession } from '@/lib/student-auth'
 import { PendingSubmitButton } from '../../components/pending-submit-button'
@@ -10,8 +12,12 @@ import { StudentNavLink } from '../../components/student-nav-link'
 
 export default async function StudentPage() {
   const session = await requireStudentSession()
-  const { student, sections, parashaName, error } =
-    await getStudentDashboardData(session.id)
+  const { value: dashboardData, metrics: performanceMetrics } = await collectServerPerformance(() =>
+    measureServerPerformance('page.student.dashboard_data', () =>
+      getStudentDashboardData(session.id)
+    )
+  )
+  const { student, sections, parashaName, error } = dashboardData
 
   if (error || !student) {
     return (
@@ -55,6 +61,7 @@ export default async function StudentPage() {
   return (
     <main className="student-app">
       <div className="student-shell space-y-6">
+        <PerformanceDiagnostics metrics={performanceMetrics} />
         <section className="student-hero text-white">
           <div className="relative z-10 flex flex-wrap items-start justify-between gap-4">
             <div className="max-w-3xl">

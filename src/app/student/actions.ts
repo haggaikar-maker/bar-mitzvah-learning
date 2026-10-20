@@ -8,9 +8,12 @@ import {
   isLessonPartReady,
 } from '@/lib/lesson-media'
 import { deleteStorageObject, uploadStorageFile } from '@/lib/storage-files'
+import { createStudentDirectAccessLink } from '@/lib/student-direct-links'
 import { requireStudentSession } from '@/lib/student-auth'
 import { supabase } from '@/lib/supabase'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { refreshStudentWhatsAppCatalog } from '@/lib/whatsapp-bot'
+import { sanitizePhoneNumber, sendWhatsAppTextMessage } from '@/lib/whatsapp'
 
 export async function recordPracticeEvent(input: {
   lessonPartId: number
@@ -31,6 +34,111 @@ export async function recordPracticeEvent(input: {
   await refreshStudentWhatsAppCatalog(session.id)
 
   return event
+}
+
+type ListeningInterval = { start: number; end: number }
+
+function mergeListeningIntervals(intervals: ListeningInterval[], durationSeconds: number) {
+  const sorted = intervals
+    .map(({ start, end }) => ({
+      start: Math.max(0, Math.min(durationSeconds, start)),
+      end: Math.max(0, Math.min(durationSeconds, end)),
+    }))
+    .filter(({ start, end }) => end > start)
+    .sort((left, right) => left.start - right.start)
+  const merged: ListeningInterval[] = []
+  for (const interval of sorted) {
+    const previous = merged.at(-1)
+    if (previous && interval.start <= previous.end + 0.15) {
+      previous.end = Math.max(previous.end, interval.end)
+    } else {
+      merged.push({ ...interval })
+    }
+  }
+  return merged
+}
+
+export async function recordListeningProgress(input: {
+  sessionId: string
+  lessonPartId: number
+  durationSeconds: number
+  listenedSeconds: number
+  intervals: ListeningInterval[]
+}) {
+  const session = await requireStudentSession()
+  await getStudentLessonPartForRecording(session.id, input.lessonPartId)
+  const durationSeconds = Math.round(input.durationSeconds)
+  if (!/^[0-9a-f-]{36}$/i.test(input.sessionId) || durationSeconds < 1 || durationSeconds > 7200) {
+    throw new Error('נתוני סשן ההאזנה אינם תקינים.')
+  }
+
+  const supabaseAdmin = getSupabaseAdmin()
+  // This table is created by the synchronized-listening SQL migration.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const listeningDb = supabaseAdmin as any
+  const { data: previous, error: previousError } = await listeningDb
+    .from('student_listening_sessions')
+    .select('listened_seconds, covered_intervals, completed')
+    .eq('id', input.sessionId)
+    .eq('student_id', session.id)
+    .maybeSingle()
+  if (previousError) throw new Error(previousError.message)
+
+  const intervals = mergeListeningIntervals(
+    [...((previous?.covered_intervals ?? []) as ListeningInterval[]), ...input.intervals],
+    durationSeconds
+  )
+  const coveredSeconds = intervals.reduce((sum, interval) => sum + interval.end - interval.start, 0)
+  const coveragePercent = Math.min(100, (coveredSeconds / durationSeconds) * 100)
+  const completed = Boolean(previous?.completed) || coveragePercent >= 80
+  const listenedSeconds = Math.max(
+    Number(previous?.listened_seconds ?? 0),
+    Math.min(Math.round(input.listenedSeconds), 24 * 60 * 60)
+  )
+  const { error } = await listeningDb
+    .from('student_listening_sessions')
+    .upsert({
+      id: input.sessionId,
+      student_id: session.id,
+      lesson_part_id: input.lessonPartId,
+      duration_seconds: durationSeconds,
+      listened_seconds: listenedSeconds,
+      covered_intervals: intervals,
+      coverage_percent: coveragePercent,
+      completed,
+      updated_at: new Date().toISOString(),
+      ...(completed && !previous?.completed ? { completed_at: new Date().toISOString() } : {}),
+    }, { onConflict: 'id' })
+  if (error) throw new Error(error.message)
+
+  if (completed && !previous?.completed) {
+    // The unique session id makes completion counting idempotent across pause/end retries.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: eventError } = await (supabaseAdmin as any)
+      .from('practice_events')
+      .upsert({
+        student_id: session.id,
+        lesson_part_id: input.lessonPartId,
+        completed: true,
+        listening_session_id: input.sessionId,
+      }, { onConflict: 'listening_session_id', ignoreDuplicates: true })
+    if (eventError) throw new Error(eventError.message)
+    await refreshStudentWhatsAppCatalog(session.id)
+  }
+
+  const { data: progressRows, error: progressError } = await listeningDb
+    .from('student_listening_sessions')
+    .select('listened_seconds, completed')
+    .eq('student_id', session.id)
+    .eq('lesson_part_id', input.lessonPartId)
+  if (progressError) throw new Error(progressError.message)
+  const rows = (progressRows ?? []) as Array<{ listened_seconds: number; completed: boolean }>
+  return {
+    listenedSeconds: rows.reduce((sum, row) => sum + (row.listened_seconds ?? 0), 0),
+    completedSessions: rows.filter((row) => row.completed).length,
+    coveragePercent,
+    completed,
+  }
 }
 
 async function getStudentLessonPartForRecording(studentId: number, lessonPartId: number) {
@@ -129,7 +237,10 @@ async function getStudentLessonPartForRecording(studentId: number, lessonPartId:
 
   if (!nativeMediaAvailable) {
     // Synchronized text readings are valid practice targets even without video or slides.
-    const { data: synchronizedReading, error: synchronizedReadingError } = await supabase
+    // RLS intentionally blocks anon access to synchronized readings; this query
+    // runs only after the student's session and lesson ownership were verified.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: synchronizedReading, error: synchronizedReadingError } = await (getSupabaseAdmin() as any)
       .from('student_lesson_part_readings')
       .select('id')
       .eq('student_id', session.id)
@@ -146,6 +257,7 @@ async function getStudentLessonPartForRecording(studentId: number, lessonPartId:
 
   return {
     session,
+    assignedAdminId: teacherParasha?.owner_admin_id ?? lessonGroup.admin_id ?? session.adminId,
     lessonPart: lessonPart as {
       id: number
       name: string
@@ -156,6 +268,77 @@ async function getStudentLessonPartForRecording(studentId: number, lessonPartId:
       video_url_nikud?: string | null
       video_url_tikkun?: string | null
     },
+  }
+}
+
+async function notifyAdminsAboutStudentRecording(input: {
+  studentId: number
+  studentName: string
+  lessonPartId: number
+  lessonPartName: string
+  assignedAdminId: number | null
+}) {
+  try {
+    // Admin contact details are read with the service-role client because students
+    // must not be able to enumerate administrator phone numbers.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = getSupabaseAdmin() as any
+    const { data: admins, error } = await db
+      .from('admins')
+      .select('id, display_name, role, whatsapp_phone, status')
+    if (error) throw new Error(error.message)
+
+    const activeAdmins = (admins ?? []).filter((admin: { status: string | null }) => admin.status !== 'inactive') as Array<{
+      id: number
+      display_name: string
+      role: string
+      whatsapp_phone: string | null
+      status: string | null
+    }>
+    const recipientsByPhone = new Map<string, { name: string }>()
+    for (const admin of activeAdmins) {
+      const shouldNotify = admin.role === 'primary' || admin.id === input.assignedAdminId
+      const phone = sanitizePhoneNumber(admin.whatsapp_phone ?? '')
+      if (shouldNotify && phone) recipientsByPhone.set(phone, { name: admin.display_name })
+    }
+
+    if (recipientsByPhone.size === 0) {
+      console.warn('Student recording saved but no manager WhatsApp recipients are configured', {
+        studentId: input.studentId,
+        lessonPartId: input.lessonPartId,
+      })
+      return
+    }
+
+    const lessonLink = await createStudentDirectAccessLink({
+      studentId: input.studentId,
+      lessonPartId: input.lessonPartId,
+      adminId: input.assignedAdminId,
+    })
+    const message = [
+      `התלמיד ${input.studentName} שמר הקלטה חדשה.`,
+      `תת־חלק: ${input.lessonPartName}`,
+      `קישור ישיר לקטע: ${lessonLink}`,
+    ].join('\n')
+    const results = await Promise.allSettled(
+      [...recipientsByPhone.entries()].map(([to]) => sendWhatsAppTextMessage({ to, body: message }))
+    )
+    const failures = results.flatMap((result, index) => result.status === 'rejected'
+      ? [{ recipient: [...recipientsByPhone.values()][index]?.name, reason: result.reason }]
+      : [])
+    if (failures.length) {
+      console.error('Student recording saved but manager notification failed', {
+        studentId: input.studentId,
+        lessonPartId: input.lessonPartId,
+        failures,
+      })
+    }
+  } catch (error) {
+    console.error('Student recording saved but manager notifications could not be sent', {
+      studentId: input.studentId,
+      lessonPartId: input.lessonPartId,
+      error,
+    })
   }
 }
 
@@ -173,7 +356,7 @@ export async function saveStudentRecording(formData: FormData) {
     throw new Error('חסרים קובץ הקלטה או מזהה תת־חלק.')
   }
 
-  const { lessonPart } = await getStudentLessonPartForRecording(
+  const { lessonPart, assignedAdminId } = await getStudentLessonPartForRecording(
     session.id,
     lessonPartId
   )
@@ -233,6 +416,14 @@ export async function saveStudentRecording(formData: FormData) {
   if (error) {
     throw new Error(error.message)
   }
+
+  await notifyAdminsAboutStudentRecording({
+    studentId: session.id,
+    studentName: session.name,
+    lessonPartId,
+    lessonPartName: lessonPart.name,
+    assignedAdminId,
+  })
 
   revalidatePath('/student')
   revalidatePath('/admin')

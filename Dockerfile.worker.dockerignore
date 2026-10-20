@@ -1,0 +1,8 @@
+**
+!tools/
+!tools/text_sync_worker.py
+!tools/text-sync-runtime/
+!tools/text-sync-runtime/**
+!src/
+!src/data/
+!src/data/tikkun-torah-layout.json

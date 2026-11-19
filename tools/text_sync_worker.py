@@ -9,6 +9,7 @@ import re
 import signal
 import sys
 import tempfile
+import threading
 import time
 import unicodedata
 from functools import lru_cache
@@ -146,6 +147,26 @@ def worker_request_headers(secret: str) -> dict[str, str]:
     return headers
 
 
+def get_worker_id() -> str:
+    configured = os.environ.get("TEXT_SYNC_WORKER_ID", "").strip()
+    if configured:
+        return re.sub(r"[^A-Za-z0-9_.:-]", "-", configured)[:80]
+    if os.environ.get("VERCEL"):
+        return "vercel-daemon"
+    machine = re.sub(r"[^A-Za-z0-9_.:-]", "-", platform.node() or "computer")[:60]
+    return f"local-{machine}"
+
+
+def send_worker_heartbeat(site_url: str, secret: str, worker_id: str, active_job_id: str | None):
+    response = requests.post(
+        f"{site_url.rstrip('/')}/api/text-sync-worker/heartbeat",
+        json={"workerId": worker_id, "activeJobId": active_job_id},
+        headers=worker_request_headers(secret),
+        timeout=20,
+    )
+    response.raise_for_status()
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as audio_file:
@@ -155,6 +176,7 @@ def sha256_file(path: Path) -> str:
 
 
 def update_job(site_url: str, secret: str, job_id: str, **payload: Any):
+    payload.setdefault("workerId", get_worker_id())
     response = requests.patch(
         f"{site_url.rstrip('/')}/api/text-sync-worker/jobs/{job_id}",
         json=payload,
@@ -596,6 +618,10 @@ def main():
         )
 
     shutdown_requested = False
+    worker_id = get_worker_id()
+    active_job: dict[str, str | None] = {"id": None}
+    active_job_lock = threading.Lock()
+    heartbeat_shutdown = threading.Event()
 
     def request_shutdown(signum, _frame):
         nonlocal shutdown_requested
@@ -604,12 +630,33 @@ def main():
             shutdown_requested = True
 
     signal.signal(signal.SIGTERM, request_shutdown)
-    print(f"Text sync worker started; polling {site_url}.", flush=True)
+
+    def heartbeat_loop():
+        last_error = None
+        while not heartbeat_shutdown.is_set():
+            try:
+                with active_job_lock:
+                    active_job_id = active_job["id"]
+                send_worker_heartbeat(site_url, args.worker_secret, worker_id, active_job_id)
+                if last_error:
+                    print("Worker heartbeat recovered.", flush=True)
+                    last_error = None
+            except Exception as error:
+                message = str(error)
+                if message != last_error:
+                    print(f"Worker heartbeat failed: {message}", flush=True)
+                    last_error = message
+            heartbeat_shutdown.wait(30)
+
+    heartbeat_thread = threading.Thread(target=heartbeat_loop, name="worker-heartbeat", daemon=True)
+    heartbeat_thread.start()
+    print(f"Text sync worker {worker_id} started; polling {site_url}.", flush=True)
 
     while not shutdown_requested:
         try:
             response = requests.post(
                 f"{site_url}/api/text-sync-worker/claim",
+                json={"workerId": worker_id},
                 headers=worker_request_headers(args.worker_secret),
                 timeout=120,
             )
@@ -617,9 +664,12 @@ def main():
             job = response.json().get("job")
             if not job:
                 if args.once:
+                    heartbeat_shutdown.set()
                     return
                 time.sleep(max(args.poll_seconds, 1.0))
                 continue
+            with active_job_lock:
+                active_job["id"] = job["id"]
             try:
                 process_job(site_url, args.worker_secret, job, text2video_path)
                 print(f"Job {job.get('id')} completed.", flush=True)
@@ -629,13 +679,21 @@ def main():
                     update_job(site_url, args.worker_secret, job["id"], status="failed", progressPercent=100, errorMessage=str(error))
                 except Exception as update_error:
                     print(f"Could not report worker failure: {update_error}", flush=True)
+            finally:
+                with active_job_lock:
+                    active_job["id"] = None
             if args.once:
+                heartbeat_shutdown.set()
                 return
         except requests.RequestException as error:
             print(f"Worker request failed: {error}", flush=True)
             if args.once:
+                heartbeat_shutdown.set()
                 raise
             time.sleep(max(args.poll_seconds, 2.0))
+
+    heartbeat_shutdown.set()
+    heartbeat_thread.join(timeout=2)
 
 
 if __name__ == "__main__":

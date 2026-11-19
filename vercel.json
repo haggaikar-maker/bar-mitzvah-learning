@@ -5,7 +5,7 @@
       "root": ".",
       "entrypoint": "Dockerfile.worker",
       "instances": {
-        "iad1": 1
+        "iad1": 0
       },
       "terminationGracePeriodSeconds": 900
     }

@@ -1,0 +1,92 @@
+name: Text sync worker failover
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: text-sync-worker-failover
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile-daemon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Link Vercel project
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx --yes vercel@64.7.0 link --yes --project bar-mitzvah-learning --scope haggai-maker --token "$VERCEL_TOKEN"
+
+      - name: Reconcile worker capacity
+        env:
+          FAILOVER_SECRET: ${{ secrets.TEXT_SYNC_FAILOVER_SECRET }}
+          SITE_URL: https://bar-mitzvah-learning.vercel.app
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          state="$(curl --fail --silent --show-error \
+            -H "x-text-sync-failover-secret: $FAILOVER_SECRET" \
+            "$SITE_URL/api/text-sync-worker/failover-state")"
+          desired="$(jq -r '.desiredInstances' <<< "$state")"
+          reason="$(jq -r '.reason' <<< "$state")"
+          cloud_overdue="$(jq -r '.cloudStartOverdue' <<< "$state")"
+          cloud_online="$(jq -r '.cloudOnline' <<< "$state")"
+          echo "Desired iad1 instances: $desired ($reason)"
+          echo "$state" | jq .
+
+          if [ "$desired" -eq 1 ] && [ "$cloud_online" = "true" ]; then
+            scale_status=0
+            scale_output="Daemon already heartbeating; no scale change needed."
+            event_type=""
+            message=""
+          else
+            set +e
+            scale_output="$(npx --yes vercel@64.7.0 daemons scale text-sync-worker "iad1=$desired" --scope haggai-maker --token "$VERCEL_TOKEN" 2>&1)"
+            scale_status=$?
+            set -e
+            event_type=""
+            message=""
+          fi
+          echo "$scale_output"
+
+          if [ "$scale_status" -eq 0 ] && [ -z "$event_type" ]; then
+            if [ "$desired" -eq 1 ] && [ "$cloud_overdue" = "true" ]; then
+              event_type="scale_failed"
+              message="Vercel accepted the scale request but the daemon did not heartbeat within the expected time; check Hobby quota and daemon logs."
+            elif [ "$desired" -eq 1 ] && [ "$cloud_online" != "true" ]; then
+              event_type="scale_requested"
+              message="Requested one Vercel worker instance: $reason"
+            fi
+          else
+            event_type="scale_failed"
+            message="Vercel daemon scale command failed: $(tail -c 700 <<< "$scale_output")"
+          fi
+
+          if [ -n "$event_type" ]; then
+            payload="$(jq -n \
+              --arg eventType "$event_type" \
+              --arg message "$message" \
+              --arg reason "$reason" \
+              --argjson desiredInstances "$desired" \
+              '{eventType:$eventType,message:$message,metadata:{reason:$reason,desiredInstances:$desiredInstances}}')"
+            curl --fail --silent --show-error \
+              -H "x-text-sync-failover-secret: $FAILOVER_SECRET" \
+              -H 'content-type: application/json' \
+              -X POST --data "$payload" \
+              "$SITE_URL/api/text-sync-worker/failover-event"
+          fi
+
+          exit "$scale_status"

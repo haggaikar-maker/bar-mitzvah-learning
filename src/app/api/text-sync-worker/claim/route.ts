@@ -14,10 +14,18 @@ function isAuthorized(request: Request) {
 
 export async function POST(request: Request) {
   if (!isAuthorized(request)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  let body: { workerId?: string }
+  try {
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
+  }
+  const workerId = typeof body.workerId === 'string' ? body.workerId.trim() : ''
+  if (!workerId || workerId.length > 80) return NextResponse.json({ error: 'Invalid workerId.' }, { status: 400 })
   // The job table is added by a manual Supabase migration.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = getSupabaseAdmin() as any
-  const { data, error } = await db.rpc('claim_text_sync_job')
+  const { data, error } = await db.rpc('claim_text_sync_job', { p_worker_id: workerId })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   const job = Array.isArray(data) ? data[0] : data
   if (!job) return NextResponse.json({ job: null })
